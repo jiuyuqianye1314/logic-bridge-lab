@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 
 import pandas as pd
 import streamlit as st
+from streamlit_ace import st_ace
 
 
 # =========================================================
@@ -29,7 +30,7 @@ st.markdown(
     """
     <style>
     .main-title {
-        font-size: 2.1rem;
+        font-size: 2.2rem;
         font-weight: 800;
         margin-bottom: 0.2rem;
     }
@@ -40,7 +41,7 @@ st.markdown(
     }
     .section-card {
         padding: 1rem;
-        border-radius: 12px;
+        border-radius: 14px;
         background: rgba(255,255,255,0.04);
         border: 1px solid rgba(255,255,255,0.08);
         margin-bottom: 1rem;
@@ -87,6 +88,24 @@ st.markdown(
         border: 1px solid #2D7D46;
         background: #13291C;
         margin-bottom: 0.6rem;
+    }
+    .status-good {
+        padding: 0.8rem;
+        border-radius: 10px;
+        background: #102A1B;
+        border: 1px solid #2B7A4B;
+    }
+    .status-warn {
+        padding: 0.8rem;
+        border-radius: 10px;
+        background: #2D240E;
+        border: 1px solid #A47C1B;
+    }
+    .status-bad {
+        padding: 0.8rem;
+        border-radius: 10px;
+        background: #2B1414;
+        border: 1px solid #B04B4B;
     }
     </style>
     """,
@@ -351,7 +370,6 @@ def time_limit(seconds: int = 2):
             signal.alarm(0)
             signal.signal(signal.SIGALRM, old_handler)
     else:
-        # Fallback for environments without SIGALRM
         yield
 
 
@@ -658,6 +676,7 @@ def grade_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
     success = passed == total_tests
     if success:
         msg = "Excellent! Your code passed all public and hidden tests."
+        level = "correct"
     else:
         public_failed = [d for d in details if d["public"] and not d["ok"]]
         if public_failed:
@@ -666,11 +685,14 @@ def grade_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
                 f"Not quite yet. Public test failed for input {f['input']}. "
                 f"Expected {f['expected']}, but got {f['result']}."
             )
+            level = "partial"
         else:
             msg = "Your code passed the visible tests, but some hidden tests failed. Check edge cases and robustness."
+            level = "partial"
 
     return {
         "ok": success,
+        "level": level,
         "type": "graded",
         "message": msg,
         "passed": passed,
@@ -730,36 +752,29 @@ def render_sidebar() -> str:
 
         st.markdown("---")
         if st.button("Reset Current Draft", use_container_width=True):
-            keys_to_clear = [
-                "think_math",
-                "think_python",
-                "pair_pseudocode",
-                "pair_roles",
-                "pair_tests",
-                "genai_reason",
-                "genai_prompt",
-                "genai_output",
-                "genai_use",
-                "audit_accuracy",
-                "audit_clarity",
-                "audit_edge_cases",
-                "audit_overreliance",
-                "audit_judgement",
-                "reflect_helpful",
-                "reflect_human",
-                "reflect_next",
-                "think_done",
-                "pair_done",
-                "genai_done",
-                "audit_done",
-                "reflect_done",
-                "last_submission_message",
-            ]
-            for k in keys_to_clear:
-                if isinstance(st.session_state.get(k), bool):
-                    st.session_state[k] = False
-                else:
-                    st.session_state[k] = ""
+            st.session_state.think_math = ""
+            st.session_state.think_python = ""
+            st.session_state.pair_pseudocode = ""
+            st.session_state.pair_roles = ""
+            st.session_state.pair_tests = ""
+            st.session_state.genai_reason = ""
+            st.session_state.genai_prompt = ""
+            st.session_state.genai_output = ""
+            st.session_state.genai_use = ""
+            st.session_state.audit_accuracy = False
+            st.session_state.audit_clarity = False
+            st.session_state.audit_edge_cases = False
+            st.session_state.audit_overreliance = False
+            st.session_state.audit_judgement = ""
+            st.session_state.reflect_helpful = ""
+            st.session_state.reflect_human = ""
+            st.session_state.reflect_next = ""
+            st.session_state.think_done = False
+            st.session_state.pair_done = False
+            st.session_state.genai_done = False
+            st.session_state.audit_done = False
+            st.session_state.reflect_done = False
+            st.session_state.last_submission_message = ""
             st.rerun()
 
     return page
@@ -771,19 +786,12 @@ def render_sidebar() -> str:
 def render_header() -> None:
     st.markdown(f"<div class='main-title'>🧠 {PROJECT_TITLE}</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='sub-title'>{PROJECT_TAGLINE}</div>", unsafe_allow_html=True)
-
-    tags = [
-        "Think",
-        "Pair",
-        "GenAI Support",
-        "Audit",
-        "Reflect",
-    ]
+    tags = ["Think", "Pair", "GenAI Support", "Audit", "Reflect", "Code Studio"]
     st.markdown("".join([f"<span class='mini-tag'>{t}</span>" for t in tags]), unsafe_allow_html=True)
 
 
 # =========================================================
-# PAGES
+# PAGE RENDERERS
 # =========================================================
 def render_home() -> None:
     render_header()
@@ -797,7 +805,7 @@ def render_home() -> None:
             f"""
             <div class='section-card'>
                 <b>Think → Pair → GenAI → Audit → Reflect</b><br><br>
-                This prototype operationalises the lesson design by guiding students through a structured sequence:
+                This prototype operationalises a structured sequence:
                 <ol>
                     {''.join([f"<li>{x}</li>" for x in LEARNING_RULE])}
                 </ol>
@@ -814,8 +822,18 @@ def render_home() -> None:
             unsafe_allow_html=True,
         )
 
-        st.subheader("This lesson task")
-        st.write("Students use the Euclidean Algorithm to write:")
+        st.subheader("New upgraded platform features")
+        st.markdown(
+            """
+            - Students can write Python directly inside the platform
+            - The editor now supports syntax highlighting (VS Code-like experience)
+            - The system gives instant formative feedback
+            - Teachers can live-check sample code in class
+            - Students unlock concept cards as they complete missions
+            """
+        )
+
+        st.subheader("Lesson tasks")
         st.code(
             "gcd(a, b)\n"
             "simplify_fraction(a, b)\n"
@@ -823,14 +841,9 @@ def render_home() -> None:
             language="python",
         )
 
-        st.info(
-            "New upgrade: students can now write Python directly in the platform, receive immediate correctness feedback, and unlock knowledge cards step by step."
-        )
-
     with right:
         st.subheader("Current Draft Summary")
         summary = current_draft_summary()
-
         st.markdown(f"**Group ID**  \n{summary['group_id']}")
         st.markdown(f"**Class**  \n{summary['class_id']}")
         st.markdown(f"**Student Count**  \n{summary['student_count']}")
@@ -838,39 +851,22 @@ def render_home() -> None:
         st.markdown(f"**Knowledge Unlocked**  \n{summary['knowledge_unlocked']}")
         st.markdown(f"**Code Missions Completed**  \n{summary['missions_completed']}")
 
-        st.markdown("---")
-        st.subheader("Evidence Alignment")
-        st.write("This app can support collection of:")
-        st.markdown(
-            """
-            - pseudocode drafts
-            - AI-use logs
-            - auditor decisions
-            - reflection data
-            - code-lab progress
-            - submission summaries
-            """
-        )
-
 
 def render_think() -> None:
     render_header()
     st.markdown("---")
     st.subheader("Think")
-    st.caption("Students articulate the logic before collaboration or AI support.")
 
     with st.form("think_form"):
         think_math = st.text_area(
             "1) Explain the mathematical logic for simplifying a fraction",
             value=st.session_state.think_math,
             height=160,
-            placeholder="Example: To simplify 8/12, first find the gcd of 8 and 12, then divide both by that gcd...",
         )
         think_python = st.text_area(
             "2) Bridge the idea to Python",
             value=st.session_state.think_python,
             height=140,
-            placeholder="Example: I need a function gcd(a, b), then another function to divide numerator and denominator...",
         )
         submitted = st.form_submit_button("Save Think Stage")
 
@@ -885,26 +881,22 @@ def render_pair() -> None:
     render_header()
     st.markdown("---")
     st.subheader("Pair")
-    st.caption("Students compare reasoning, refine pseudocode, and define simple test cases.")
 
     with st.form("pair_form"):
         pseudocode = st.text_area(
             "Group pseudocode / algorithm sketch",
             value=st.session_state.pair_pseudocode,
             height=180,
-            placeholder="Example:\n1. While b != 0, update a and b\n2. gcd = a\n3. Divide numerator and denominator by gcd",
         )
         roles = st.text_area(
             "Group roles / collaboration notes",
             value=st.session_state.pair_roles,
             height=100,
-            placeholder="Example: Student A explains math logic; Student B checks test cases; Student C compares outputs...",
         )
         tests = st.text_area(
             "Planned test cases",
             value=st.session_state.pair_tests,
             height=100,
-            placeholder="Example:\n(8,12) -> (2,3)\n(7,13) -> (7,13)\n(5,0) -> Undefined",
         )
         submitted = st.form_submit_button("Save Pair Stage")
 
@@ -920,33 +912,12 @@ def render_genai() -> None:
     render_header()
     st.markdown("---")
     st.subheader("GenAI Support")
-    st.caption("Students document why and how they used AI, instead of treating AI as an invisible shortcut.")
 
     with st.form("genai_form"):
-        reason = st.text_area(
-            "Why are you using AI at this point?",
-            value=st.session_state.genai_reason,
-            height=80,
-            placeholder="Example: We want AI to help us check whether our loop logic is correct.",
-        )
-        prompt = st.text_area(
-            "What prompt would you ask?",
-            value=st.session_state.genai_prompt,
-            height=140,
-            placeholder="Example: Explain whether this gcd loop is correct and suggest a cleaner version without solving the full task for us.",
-        )
-        output = st.text_area(
-            "What did the AI suggest? (summary only)",
-            value=st.session_state.genai_output,
-            height=120,
-            placeholder="Example: AI suggested using a, b = b, a % b and reminded us to consider denominator = 0.",
-        )
-        use_decision = st.text_area(
-            "Did you use the suggestion? Why or why not?",
-            value=st.session_state.genai_use,
-            height=120,
-            placeholder="Example: We used the loop update but changed the error-handling ourselves.",
-        )
+        reason = st.text_area("Why are you using AI at this point?", value=st.session_state.genai_reason, height=80)
+        prompt = st.text_area("What prompt would you ask?", value=st.session_state.genai_prompt, height=140)
+        output = st.text_area("What did the AI suggest? (summary only)", value=st.session_state.genai_output, height=120)
+        use_decision = st.text_area("Did you use the suggestion? Why or why not?", value=st.session_state.genai_use, height=120)
         submitted = st.form_submit_button("Save GenAI Stage")
 
     if submitted:
@@ -962,36 +933,17 @@ def render_audit() -> None:
     render_header()
     st.markdown("---")
     st.subheader("Audit")
-    st.caption("Students evaluate AI outputs critically before accepting them.")
 
     with st.form("audit_form"):
         col1, col2 = st.columns(2)
         with col1:
-            accuracy = st.checkbox(
-                "We checked mathematical / code correctness",
-                value=st.session_state.audit_accuracy,
-            )
-            clarity = st.checkbox(
-                "We checked whether the explanation is clear",
-                value=st.session_state.audit_clarity,
-            )
+            accuracy = st.checkbox("We checked mathematical / code correctness", value=st.session_state.audit_accuracy)
+            clarity = st.checkbox("We checked whether the explanation is clear", value=st.session_state.audit_clarity)
         with col2:
-            edge_cases = st.checkbox(
-                "We checked hidden or edge cases",
-                value=st.session_state.audit_edge_cases,
-            )
-            overreliance = st.checkbox(
-                "We discussed whether AI is doing too much thinking for us",
-                value=st.session_state.audit_overreliance,
-            )
+            edge_cases = st.checkbox("We checked hidden or edge cases", value=st.session_state.audit_edge_cases)
+            overreliance = st.checkbox("We discussed whether AI is doing too much thinking for us", value=st.session_state.audit_overreliance)
 
-        judgement = st.text_area(
-            "Final judgement about the AI support",
-            value=st.session_state.audit_judgement,
-            height=120,
-            placeholder="Example: Helpful for debugging syntax, but we should not copy the full solution without understanding it.",
-        )
-
+        judgement = st.text_area("Final judgement about the AI support", value=st.session_state.audit_judgement, height=120)
         submitted = st.form_submit_button("Save Audit Stage")
 
     if submitted:
@@ -1000,9 +952,7 @@ def render_audit() -> None:
         st.session_state.audit_edge_cases = edge_cases
         st.session_state.audit_overreliance = overreliance
         st.session_state.audit_judgement = judgement
-        st.session_state.audit_done = bool(
-            accuracy or clarity or edge_cases or overreliance or judgement.strip()
-        )
+        st.session_state.audit_done = bool(accuracy or clarity or edge_cases or overreliance or judgement.strip())
         st.success("Audit stage saved.")
 
 
@@ -1010,27 +960,11 @@ def render_reflect() -> None:
     render_header()
     st.markdown("---")
     st.subheader("Reflect")
-    st.caption("Students identify what AI helped with and what still required human judgement.")
 
     with st.form("reflect_form"):
-        helpful = st.text_area(
-            "What did AI help with?",
-            value=st.session_state.reflect_helpful,
-            height=110,
-            placeholder="Example: AI helped us compare loop structures and test cases.",
-        )
-        human = st.text_area(
-            "What still required human judgement?",
-            value=st.session_state.reflect_human,
-            height=110,
-            placeholder="Example: We still had to decide whether the AI suggestion really matched our task.",
-        )
-        next_time = st.text_area(
-            "What would you improve next time?",
-            value=st.session_state.reflect_next,
-            height=110,
-            placeholder="Example: We will test denominator = 0 earlier and explain our logic before asking AI.",
-        )
+        helpful = st.text_area("What did AI help with?", value=st.session_state.reflect_helpful, height=110)
+        human = st.text_area("What still required human judgement?", value=st.session_state.reflect_human, height=110)
+        next_time = st.text_area("What would you improve next time?", value=st.session_state.reflect_next, height=110)
         submitted = st.form_submit_button("Save Reflect Stage")
 
     if submitted:
@@ -1058,10 +992,22 @@ def render_feedback_panel(feedback: Dict[str, Any] | None, mission: Dict[str, An
         st.info("Run your code to see live feedback.")
         return
 
-    if feedback["ok"]:
-        st.success(feedback["message"])
+    if feedback.get("ok"):
+        st.markdown(
+            f"<div class='status-good'><b>Status:</b> Correct ✅<br>{feedback['message']}</div>",
+            unsafe_allow_html=True,
+        )
     else:
-        st.warning(feedback["message"])
+        if feedback.get("type") in ["syntax", "runtime", "missing_function", "safety", "timeout"]:
+            st.markdown(
+                f"<div class='status-bad'><b>Status:</b> Error ❌<br>{feedback['message']}</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                f"<div class='status-warn'><b>Status:</b> Almost there ⚠️<br>{feedback['message']}</div>",
+                unsafe_allow_html=True,
+            )
 
     st.markdown(f"**Score:** {feedback['passed']} / {feedback['total']} tests")
 
@@ -1076,7 +1022,6 @@ def render_feedback_panel(feedback: Dict[str, Any] | None, mission: Dict[str, An
                     "Pass": "✅" if d["ok"] else "❌",
                 }
             )
-
     if public_rows:
         st.dataframe(pd.DataFrame(public_rows), use_container_width=True, hide_index=True)
 
@@ -1126,6 +1071,24 @@ def render_knowledge_map() -> None:
         )
 
 
+def ace_editor(label: str, value: str, key: str, height: int = 320) -> str:
+    st.markdown(f"**{label}**")
+    code = st_ace(
+        value=value,
+        language="python",
+        theme="monokai",
+        key=key,
+        height=height,
+        font_size=14,
+        tab_size=4,
+        show_gutter=True,
+        show_print_margin=False,
+        wrap=True,
+        auto_update=True,
+    )
+    return code if code is not None else value
+
+
 def render_teacher_live_checker() -> None:
     st.subheader("Teacher Live Checker")
     st.caption("Paste code during class and show students whether it is correct, partially correct, or incorrect.")
@@ -1135,20 +1098,26 @@ def render_teacher_live_checker() -> None:
         options=[m["id"] for m in MISSIONS],
         format_func=lambda x: get_mission_by_id(x)["title"],
         index=[m["id"] for m in MISSIONS].index(st.session_state.teacher_checker_mission),
+        key="teacher_checker_select",
     )
     st.session_state.teacher_checker_mission = mission_id
     mission = get_mission_by_id(mission_id)
 
-    code = st.text_area(
+    default_demo = st.session_state.teacher_live_code or mission["starter_code"]
+    code = ace_editor(
         "Paste demonstration code here",
-        value=st.session_state.teacher_live_code,
-        height=260,
-        key="teacher_live_code_area",
+        default_demo,
+        key="teacher_live_code_editor",
+        height=280,
     )
     st.session_state.teacher_live_code = code
 
     if st.button("Check Demo Code", key="teacher_check_btn"):
         result = grade_code(code, mission)
+        st.session_state["teacher_live_feedback"] = result
+
+    result = st.session_state.get("teacher_live_feedback")
+    if result:
         render_feedback_panel(result, mission)
 
     with st.expander("Suggested teacher talk"):
@@ -1207,23 +1176,23 @@ def render_code_lab() -> None:
         buffer_key = mission["id"]
 
         st.subheader(mission["title"])
-        code = st.text_area(
+        code = ace_editor(
             "Write your Python code here",
-            value=st.session_state.code_buffers[buffer_key],
-            height=360,
-            key=f"editor_{buffer_key}",
+            st.session_state.code_buffers[buffer_key],
+            key=f"student_editor_{buffer_key}",
+            height=380,
         )
         st.session_state.code_buffers[buffer_key] = code
 
-        b1, b2 = st.columns(2)
-        with b1:
+        btn1, btn2 = st.columns(2)
+        with btn1:
             if st.button("▶ Check My Code", use_container_width=True, key=f"run_{buffer_key}"):
                 feedback = grade_code(code, mission)
                 st.session_state.mission_feedback[buffer_key] = feedback
                 if feedback["ok"]:
                     unlock_for_mission(mission)
 
-        with b2:
+        with btn2:
             if st.button("↺ Reset Starter Code", use_container_width=True, key=f"reset_{buffer_key}"):
                 st.session_state.code_buffers[buffer_key] = mission["starter_code"]
                 st.rerun()
@@ -1288,10 +1257,9 @@ def render_teacher_dashboard() -> None:
         )
 
         st.markdown("---")
-        st.subheader("Current App Notes")
         st.write("- Use coded group IDs rather than personal identifiers.")
-        st.write("- The local file storage is suitable for prototype/demo use.")
-        st.write("- For long-term deployment, connect to a proper database or approved secure storage.")
+        st.write("- This local file storage is suitable for prototype/demo use.")
+        st.write("- For long-term use, connect to approved secure storage.")
 
 
 # =========================================================
