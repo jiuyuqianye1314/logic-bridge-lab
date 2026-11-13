@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import ast
-import json
-import signal
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import json
 from pathlib import Path
-from typing import Any, Dict, List
+import signal
+import threading
+from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -41,28 +42,29 @@ st.markdown(
     }
     .mini-tag {
         display: inline-block;
-        padding: 0.2rem 0.6rem;
+        padding: 0.18rem 0.55rem;
         border-radius: 999px;
         background: #E8EDFF;
         color: #1E2A78;
-        font-size: 0.8rem;
+        font-size: 0.78rem;
         font-weight: 600;
         margin-right: 0.35rem;
-        margin-bottom: 0.3rem;
+        margin-bottom: 0.25rem;
     }
     .panel-box {
-        padding: 0.9rem 1rem;
-        border-radius: 14px;
+        padding: 0.85rem 1rem;
+        border-radius: 12px;
         background: rgba(255,255,255,0.04);
         border: 1px solid rgba(255,255,255,0.08);
-        margin-bottom: 0.9rem;
+        margin-bottom: 0.85rem;
     }
     .step-box {
-        padding: 0.75rem 0.9rem;
-        border-radius: 12px;
+        padding: 0.65rem 0.85rem;
+        border-radius: 10px;
         background: #151A2D;
         border: 1px solid #2C3559;
-        margin-bottom: 0.6rem;
+        margin-bottom: 0.5rem;
+        font-size: 0.92rem;
     }
     .status-good {
         padding: 0.8rem 1rem;
@@ -101,7 +103,7 @@ st.markdown(
     }
     .muted {
         color: #B9C0D0;
-        font-size: 0.92rem;
+        font-size: 0.9rem;
     }
     .explorer-item {
         padding: 0.55rem 0.75rem;
@@ -109,20 +111,21 @@ st.markdown(
         border: 1px solid #2C3559;
         background: #111629;
         margin-bottom: 0.45rem;
+        font-size: 0.9rem;
     }
     .assistant-card {
         padding: 0.8rem;
         border-radius: 12px;
         border: 1px solid #39436F;
         background: #141C33;
-        margin-bottom: 0.65rem;
+        margin-bottom: 0.55rem;
     }
     .assistant-card-green {
         padding: 0.8rem;
         border-radius: 12px;
         border: 1px solid #2D7D46;
         background: #13291C;
-        margin-bottom: 0.65rem;
+        margin-bottom: 0.55rem;
     }
     </style>
     """,
@@ -194,31 +197,45 @@ BLOCKED_NAMES = {
 KNOWLEDGE_LIBRARY = {
     "modulo": {
         "title": "Modulo (%)",
-        "body": "Use `a % b` to get the remainder. In the Euclidean Algorithm, repeatedly replacing `(a, b)` with `(b, a % b)` helps find the gcd.",
+        "body": "Use `a % b` to get the remainder. In the Euclidean Algorithm, replacing `(a, b)` with `(b, a % b)` reduces the problem step by step.",
+        "example": "12 % 8  # returns 4\na, b = b, a % b",
+        "pro_tip": "Math insight: gcd(a, b) == gcd(b, a % b) always holds until b reaches 0.",
     },
     "while_loop": {
         "title": "while loop",
-        "body": "A `while` loop repeats until a condition becomes false. It is useful for step-by-step reduction algorithms such as gcd.",
+        "body": "A `while` loop repeats until a condition becomes False. Ideal when the exact number of steps is unknown.",
+        "example": "while b != 0:\n    a, b = b, a % b\nreturn a",
+        "pro_tip": "Always make sure loop variables change inside the loop to avoid infinite loops.",
     },
     "function_reuse": {
         "title": "Function Reuse",
-        "body": "A helper function such as `gcd(a, b)` can be reused inside another function like `simplify_fraction(a, b)`.",
+        "body": "Call an existing helper function like `gcd(a, b)` inside a new function instead of rewriting the loop.",
+        "example": "def simplify_fraction(a, b):\n    g = gcd(a, b)  # reuse helper!",
+        "pro_tip": "Modular code (DRY: Don't Repeat Yourself) makes debugging and testing much easier.",
     },
     "edge_cases": {
-        "title": "Edge Cases",
-        "body": "Always think about special inputs such as denominator = 0, already simplified fractions, or unexpected values.",
+        "title": "Edge Cases (Guard Clause)",
+        "body": "Check special or invalid inputs (such as `b == 0`) at the very top of your function before performing division.",
+        "example": "if b == 0:\n    return 'Undefined'",
+        "pro_tip": "Placing guard clauses first prevents ZeroDivisionError before helper functions run.",
     },
     "tuple_return": {
-        "title": "Tuple Return",
-        "body": "A function can return more than one value using a tuple, e.g. `return (2, 3)`.",
+        "title": "Tuple Return & Integer Division",
+        "body": "Return two integers as a tuple using parentheses `(num, den)` and integer division `//`.",
+        "example": "return (a // g, b // g)  # use // instead of / to keep integers",
+        "pro_tip": "In Python, `8 / 4` gives `2.0` (float), whereas `8 // 4` gives `2` (int).",
     },
     "testing": {
         "title": "Testing Mindset",
-        "body": "Passing visible tests is not enough. Good programmers test normal cases, edge cases, and hidden cases.",
+        "body": "Passing visible tests is not enough. Good programmers test normal cases, coprime pairs, and boundary values like 0.",
+        "example": "# Normal: (8, 12) -> (2, 3)\n# Edge: (9, 0) -> 9",
+        "pro_tip": "Hidden tests often check inputs where `a < b`, `a == b`, or `b == 0`.",
     },
     "debugging": {
-        "title": "Debugging",
-        "body": "When code fails, ask: is it syntax, logic, wrong function name, or edge-case handling?",
+        "title": "Debugging Strategy",
+        "body": "Compare Expected vs. Your Result: check return type (`tuple` vs `list`), `None` returns, or `//` vs `/`.",
+        "example": "# Check: did you write `return` instead of `print`?",
+        "pro_tip": "Tracing variables by hand with small inputs like `(8, 12)` reveals 90% of logic bugs.",
     },
 }
 
@@ -242,14 +259,14 @@ MISSIONS = [
         ],
         "unlocks": ["modulo", "while_loop", "testing"],
         "hints": [
-            "Use a loop until `b == 0`.",
-            "A common update pattern is `a, b = b, a % b`.",
-            "When the loop ends, `a` is usually the gcd.",
+            "Use a `while` loop that continues until `b == 0`.",
+            "Inside the loop, update both variables simultaneously: `a, b = b, a % b`.",
+            "When the loop ends (`b == 0`), `a` holds the greatest common divisor—remember to `return a`.",
         ],
         "common_mistakes": [
-            "Forgetting to update both `a` and `b` inside the loop.",
-            "Using division `/` instead of modulo `%`.",
-            "Returning `b` instead of `a` at the end.",
+            "Forgetting to update both `a` and `b` simultaneously inside the loop.",
+            "Using division `/` instead of remainder `%`.",
+            "Returning `b` (which is 0) instead of `a` at the end.",
         ],
     },
     {
@@ -276,14 +293,14 @@ def simplify_fraction(a, b):
         ],
         "unlocks": ["function_reuse", "tuple_return", "debugging"],
         "hints": [
-            "First compute the gcd of numerator and denominator.",
-            "Then divide both numbers by the gcd.",
-            "Return the result as a tuple, e.g. `(2, 3)`.",
+            "First compute `g = gcd(a, b)` using the helper function above.",
+            "Divide both `a` and `b` by `g` using integer division `//`.",
+            "Return the result as a tuple: `return (a // g, b // g)`.",
         ],
         "common_mistakes": [
-            "Returning a list instead of a tuple.",
-            "Forgetting to divide both numbers by the gcd.",
-            "Calling the wrong helper function name.",
+            "Returning a list `[num, den]` instead of a tuple `(num, den)`.",
+            "Using single slash `/` (which produces floats like `2.0`) instead of `//`.",
+            "Forgetting to divide both numerator and denominator by `gcd(a, b)`.",
         ],
     },
     {
@@ -311,14 +328,14 @@ def safe_simplify_fraction(a, b):
         ],
         "unlocks": ["edge_cases", "testing"],
         "hints": [
-            "Check the denominator first.",
-            "If `b == 0`, return the string `'Undefined'`.",
-            "Otherwise, simplify the fraction as before.",
+            "Check the denominator `b` at the very beginning of the function.",
+            "If `b == 0`, immediately return `'Undefined'`.",
+            "Otherwise, compute `g = gcd(a, b)` and return `(a // g, b // g)`.",
         ],
         "common_mistakes": [
-            "Checking denominator too late.",
-            "Returning None for denominator = 0.",
-            "Handling normal cases but forgetting edge cases.",
+            "Checking `b == 0` too late (after dividing by `g`, causing ZeroDivisionError).",
+            "Returning `None` or printing `'Undefined'` instead of returning the string `'Undefined'`.",
+            "Handling `b == 0` properly but forgetting to return a tuple for normal cases.",
         ],
     },
 ]
@@ -333,6 +350,7 @@ PAGES = [
     "7. Teacher Dashboard",
     "8. Code Lab IDE",
 ]
+
 
 # =========================================================
 # UTILITY
@@ -374,10 +392,16 @@ def get_mission_by_id(mission_id: str) -> Dict[str, Any]:
     return MISSIONS[0]
 
 
-def normalize_result(x: Any) -> Any:
-    if isinstance(x, list) and len(x) == 2:
-        return tuple(x)
-    return x
+def check_result_match(result: Any, expected: Any) -> Tuple[bool, str]:
+    """Exact comparison of value and type, returning (is_match, diagnostic_tag)."""
+    if result is None:
+        return False, "returned_none"
+    if isinstance(expected, tuple) and isinstance(result, list):
+        return False, "returned_list_instead_of_tuple"
+    if isinstance(expected, tuple) and isinstance(result, tuple) and len(result) == 2:
+        if any(isinstance(x, float) for x in result):
+            return False, "float_division_used"
+    return (result == expected), ""
 
 
 # =========================================================
@@ -390,9 +414,14 @@ class TimeoutException(Exception):
 @contextmanager
 def time_limit(seconds: int = 2):
     def signal_handler(signum, frame):
-        raise TimeoutException("Code execution timed out.")
+        raise TimeoutException("Code execution timed out (possible infinite loop).")
 
-    if hasattr(signal, "SIGALRM"):
+    # Only enable SIGALRM on Unix main thread to avoid ValueError in Streamlit worker threads
+    can_alarm = (
+        hasattr(signal, "SIGALRM")
+        and threading.current_thread() is threading.main_thread()
+    )
+    if can_alarm:
         old_handler = signal.signal(signal.SIGALRM, signal_handler)
         signal.alarm(seconds)
         try:
@@ -618,6 +647,7 @@ def grade_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "ok": False,
             "type": "syntax",
+            "diag_tag": "syntax",
             "level": "error",
             "message": f"Syntax error at line {e.lineno}: {e.msg}",
             "passed": 0,
@@ -630,6 +660,7 @@ def grade_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "ok": False,
             "type": "safety",
+            "diag_tag": "safety",
             "level": "error",
             "message": " | ".join(ast_errors),
             "passed": 0,
@@ -646,6 +677,7 @@ def grade_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "ok": False,
             "type": "timeout",
+            "diag_tag": "timeout",
             "level": "error",
             "message": str(e),
             "passed": 0,
@@ -656,6 +688,7 @@ def grade_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "ok": False,
             "type": "runtime",
+            "diag_tag": "runtime",
             "level": "error",
             "message": f"Runtime error while defining your function: {e}",
             "passed": 0,
@@ -668,6 +701,7 @@ def grade_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "ok": False,
             "type": "missing_function",
+            "diag_tag": "missing_function",
             "level": "error",
             "message": f"Please define a function named `{mission['function_name']}`.",
             "passed": 0,
@@ -683,24 +717,33 @@ def grade_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
 
     passed = 0
     details = []
+    first_diag_tag = ""
 
     for test in all_tests:
         args = test["input"]
         expected = test["expected"]
+        diag_tag = ""
         try:
             with time_limit(2):
                 result = fn(*args)
-            result = normalize_result(result)
-            ok = result == expected
+            ok, diag_tag = check_result_match(result, expected)
         except TimeoutException:
             result = "Timed out"
             ok = False
+            diag_tag = "timeout"
+        except ZeroDivisionError:
+            result = "Error: ZeroDivisionError"
+            ok = False
+            diag_tag = "zero_division"
         except Exception as e:
             result = f"Error: {e}"
             ok = False
+            diag_tag = "runtime_in_call"
 
         if ok:
             passed += 1
+        elif not first_diag_tag and diag_tag:
+            first_diag_tag = diag_tag
 
         details.append(
             {
@@ -723,7 +766,8 @@ def grade_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
             f = public_failed[0]
             msg = (
                 f"Not quite yet. Public test failed for input {f['input']}. "
-                f"Expected {f['expected']}, but got {f['result']}."
+                f"Expected {f['expected']} ({type(f['expected']).__name__}), "
+                f"but got {f['result']} ({type(f['result']).__name__})."
             )
             level = "partial"
         else:
@@ -733,6 +777,7 @@ def grade_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "ok": success,
         "type": "graded",
+        "diag_tag": first_diag_tag,
         "level": level,
         "message": msg,
         "passed": passed,
@@ -761,7 +806,7 @@ def render_header() -> None:
     st.markdown("".join([f"<span class='mini-tag'>{t}</span>" for t in tags]), unsafe_allow_html=True)
 
 
-def ace_editor(label: str, value: str, key: str, height: int = 360) -> str:
+def ace_editor(label: str, value: str, key: str, height: int = 340) -> str:
     st.markdown(f"**{label}**")
     code = st_ace(
         value=value,
@@ -781,7 +826,7 @@ def ace_editor(label: str, value: str, key: str, height: int = 360) -> str:
 
 def render_feedback_panel(feedback: Dict[str, Any] | None, mission: Dict[str, Any]) -> None:
     if not feedback:
-        st.info("Run your code to see feedback.")
+        st.info("Run your code to see test results and diagnostic feedback.")
         return
 
     level = feedback.get("level", "partial")
@@ -818,13 +863,11 @@ def render_feedback_panel(feedback: Dict[str, Any] | None, mission: Dict[str, An
     if public_rows:
         st.dataframe(pd.DataFrame(public_rows), use_container_width=True, hide_index=True)
 
-    st.markdown("**Mission hints**")
     shown = st.session_state.hint_levels.get(mission["id"], 0)
-    if shown == 0:
-        st.write("- Click **Show Next Hint** to reveal guided hints one by one.")
-    else:
+    if shown > 0:
+        st.markdown("**Guided Hints**")
         for i in range(min(shown, len(mission["hints"]))):
-            st.write(f"- {mission['hints'][i]}")
+            st.write(f"- **Hint {i + 1}:** {mission['hints'][i]}")
 
 
 def render_sidebar() -> None:
@@ -836,7 +879,7 @@ def render_sidebar() -> None:
         st.session_state.page = page
 
         st.markdown("---")
-        with st.expander("Current Group Setup", expanded=True):
+        with st.expander("Current Group Setup", expanded=(page == "1. Home")):
             st.session_state.group_id = st.text_input("Group ID", value=st.session_state.group_id)
             st.session_state.class_id = st.text_input("Class / Tutorial Group", value=st.session_state.class_id)
             st.session_state.student_count = st.number_input(
@@ -852,7 +895,7 @@ def render_sidebar() -> None:
         flags = current_stage_flags()
         done = sum(flags.values())
         st.progress(done / 5)
-        st.write(f"{done}/5 stages completed")
+        st.write(f"{done}/5 stages · {len(st.session_state.completed_missions)}/{len(MISSIONS)} missions")
 
         st.write(f"{'✅' if st.session_state.think_done else '⬜'} Think")
         st.write(f"{'✅' if st.session_state.pair_done else '⬜'} Pair")
@@ -919,75 +962,84 @@ def render_home() -> None:
             unsafe_allow_html=True,
         )
 
-        st.subheader("New IDE-style upgrade")
+        st.subheader("IDE-style Learning Workspace")
         st.markdown(
             """
-            - Left panel: task explorer + step-by-step learning path  
-            - Middle panel: syntax-highlighted Python editor  
-            - Right panel: teaching assistant + knowledge cards + debugging prompts  
-            - Teacher can paste code for live checking  
-            - Students unlock knowledge as they complete missions
+            - **Left panel**: Task explorer, synced Logic Blueprint, and dynamic step-by-step guide  
+            - **Middle panel**: Syntax-highlighted Python editor + instant test runner  
+            - **Right panel**: Smart error diagnosis, live concept scaffolds, and debugging prompts  
+            - **Mastery progression**: Complete missions to unlock advanced pro-tips
             """
         )
 
     with right:
         summary = current_draft_summary()
         st.subheader("Current Draft Summary")
-        st.markdown(f"**Group ID**  \n{summary['group_id']}")
-        st.markdown(f"**Class**  \n{summary['class_id']}")
-        st.markdown(f"**Student Count**  \n{summary['student_count']}")
-        st.markdown(f"**Completed Stages**  \n{summary['completed_stages']}/5")
-        st.markdown(f"**Knowledge Unlocked**  \n{summary['knowledge_unlocked']}")
-        st.markdown(f"**Code Missions Completed**  \n{summary['missions_completed']}")
+        st.markdown(f"**Group ID:** {summary['group_id']}")
+        st.markdown(f"**Class:** {summary['class_id']}")
+        st.markdown(f"**Student Count:** {summary['student_count']}")
+        st.markdown(f"**Completed Stages:** {summary['completed_stages']}/5")
+        st.markdown(f"**Concepts Mastered:** {summary['knowledge_unlocked']}/{len(KNOWLEDGE_LIBRARY)}")
+        st.markdown(f"**Code Missions Completed:** {summary['missions_completed']}/{len(MISSIONS)}")
+
+        st.markdown("---")
+        if st.button("🚀 Open Code Lab IDE", type="primary", use_container_width=True):
+            st.session_state.page = "8. Code Lab IDE"
+            st.rerun()
 
 
 def render_think() -> None:
     render_header()
     st.markdown("---")
     st.subheader("Think")
+    st.caption("Your notes here will automatically appear inside the Code Lab IDE as your Logic Blueprint.")
 
     with st.form("think_form"):
         think_math = st.text_area(
             "1) Explain the mathematical logic for simplifying a fraction",
             value=st.session_state.think_math,
-            height=160,
+            height=130,
+            placeholder="Example: To simplify a/b, find the greatest common divisor (gcd) of a and b, then divide both numbers by their gcd...",
         )
         think_python = st.text_area(
             "2) Bridge the idea to Python",
             value=st.session_state.think_python,
-            height=140,
+            height=120,
+            placeholder="Example: Use a while loop with modulo (%) to compute gcd(a, b), then use integer division // and return a tuple (a // g, b // g)...",
         )
-        submitted = st.form_submit_button("Save Think Stage")
+        submitted = st.form_submit_button("Save Think Stage", type="primary")
 
     if submitted:
         st.session_state.think_math = think_math
         st.session_state.think_python = think_python
         st.session_state.think_done = bool(think_math.strip() or think_python.strip())
-        st.success("Think stage saved.")
+        st.success("Think stage saved and synced to your Code Lab IDE.")
 
 
 def render_pair() -> None:
     render_header()
     st.markdown("---")
     st.subheader("Pair")
+    st.caption("Your group pseudocode will also sync to the Code Lab IDE sidebar.")
 
     with st.form("pair_form"):
         pseudocode = st.text_area(
             "Group pseudocode / algorithm sketch",
             value=st.session_state.pair_pseudocode,
-            height=180,
+            height=150,
+            placeholder="1. Check if b == 0 -> return 'Undefined'\n2. Find g = gcd(a, b)\n3. Return (a // g, b // g)",
         )
         roles = st.text_area(
             "Group roles / collaboration notes",
             value=st.session_state.pair_roles,
-            height=100,
+            height=95,
         )
         tests = st.text_area(
             "Planned test cases",
             value=st.session_state.pair_tests,
-            height=100,
+            height=95,
         )
-        submitted = st.form_submit_button("Save Pair Stage")
+        submitted = st.form_submit_button("Save Pair Stage", type="primary")
 
     if submitted:
         st.session_state.pair_pseudocode = pseudocode
@@ -1004,10 +1056,10 @@ def render_genai() -> None:
 
     with st.form("genai_form"):
         reason = st.text_area("Why are you using AI at this point?", value=st.session_state.genai_reason, height=80)
-        prompt = st.text_area("What prompt would you ask?", value=st.session_state.genai_prompt, height=140)
-        output = st.text_area("What did the AI suggest? (summary only)", value=st.session_state.genai_output, height=120)
-        use_decision = st.text_area("Did you use the suggestion? Why or why not?", value=st.session_state.genai_use, height=120)
-        submitted = st.form_submit_button("Save GenAI Stage")
+        prompt = st.text_area("What prompt would you ask?", value=st.session_state.genai_prompt, height=120)
+        output = st.text_area("What did the AI suggest? (summary only)", value=st.session_state.genai_output, height=110)
+        use_decision = st.text_area("Did you use the suggestion? Why or why not?", value=st.session_state.genai_use, height=110)
+        submitted = st.form_submit_button("Save GenAI Stage", type="primary")
 
     if submitted:
         st.session_state.genai_reason = reason
@@ -1033,7 +1085,7 @@ def render_audit() -> None:
             overreliance = st.checkbox("We discussed whether AI is doing too much thinking for us", value=st.session_state.audit_overreliance)
 
         judgement = st.text_area("Final judgement about the AI support", value=st.session_state.audit_judgement, height=120)
-        submitted = st.form_submit_button("Save Audit Stage")
+        submitted = st.form_submit_button("Save Audit Stage", type="primary")
 
     if submitted:
         st.session_state.audit_accuracy = accuracy
@@ -1051,10 +1103,10 @@ def render_reflect() -> None:
     st.subheader("Reflect")
 
     with st.form("reflect_form"):
-        helpful = st.text_area("What did AI help with?", value=st.session_state.reflect_helpful, height=110)
-        human = st.text_area("What still required human judgement?", value=st.session_state.reflect_human, height=110)
-        next_time = st.text_area("What would you improve next time?", value=st.session_state.reflect_next, height=110)
-        submitted = st.form_submit_button("Save Reflect Stage")
+        helpful = st.text_area("What did AI help with?", value=st.session_state.reflect_helpful, height=105)
+        human = st.text_area("What still required human judgement?", value=st.session_state.reflect_human, height=105)
+        next_time = st.text_area("What would you improve next time?", value=st.session_state.reflect_next, height=105)
+        submitted = st.form_submit_button("Save Reflect Stage", type="primary")
 
     if submitted:
         st.session_state.reflect_helpful = helpful
@@ -1076,40 +1128,63 @@ def render_reflect() -> None:
         st.info(st.session_state.last_submission_message)
 
 
-def render_left_explorer(mission: Dict[str, Any]) -> None:
+def render_left_explorer(mission: Dict[str, Any], current_code: str) -> None:
     st.markdown("### 📁 Learning Explorer")
 
     for m in MISSIONS:
         done = "✅" if m["id"] in st.session_state.completed_missions else "⬜"
-        if st.button(f"{done} {m['title']}", use_container_width=True, key=f"explorer_{m['id']}"):
+        is_current = m["id"] == mission["id"]
+        if st.button(
+            f"{done} {m['title']}",
+            use_container_width=True,
+            key=f"explorer_{m['id']}",
+            type="primary" if is_current else "secondary",
+        ):
             st.session_state.selected_mission = m["id"]
+            st.rerun()
 
-    st.markdown("---")
+    # Sync notes from Think & Pair stages directly into the coding workspace
+    if (
+        st.session_state.think_math.strip()
+        or st.session_state.think_python.strip()
+        or st.session_state.pair_pseudocode.strip()
+    ):
+        with st.expander("🧭 Your Logic Blueprint (Think/Pair)", expanded=True):
+            if st.session_state.think_math.strip():
+                st.caption("**Math Logic:**")
+                st.write(st.session_state.think_math)
+            if st.session_state.think_python.strip():
+                st.caption("**Python Bridge:**")
+                st.write(st.session_state.think_python)
+            if st.session_state.pair_pseudocode.strip():
+                st.caption("**Group Pseudocode:**")
+                st.code(st.session_state.pair_pseudocode, language="text")
+
     st.markdown(
         f"""
         <div class='panel-box'>
-            <b>Current Mission</b><br><br>
+            <b>🎯 Current Mission</b><br>
             <span class='muted'>{mission["goal"]}</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
+    # Dynamic step completion tracking
+    code_edited = current_code.strip() != mission["starter_code"].strip()
+    mission_passed = mission["id"] in st.session_state.completed_missions
+
     st.markdown("### 🪜 Step Guide")
     steps = [
         ("1. Understand the math idea", st.session_state.think_done),
         ("2. Draft pseudocode / plan", st.session_state.pair_done),
-        ("3. Code the function", True),
-        ("4. Check visible tests", st.session_state.last_checked_mission == mission["id"]),
-        ("5. Reflect on edge cases", st.session_state.audit_done or st.session_state.reflect_done),
+        ("3. Write & test function code", code_edited or mission_passed),
+        ("4. Pass all visible & hidden tests", mission_passed),
+        ("5. Audit & reflect on edge cases", st.session_state.audit_done or st.session_state.reflect_done),
     ]
     for label, done in steps:
         st.markdown(
-            f"""
-            <div class='step-box'>
-                {'✅' if done else '⬜'} {label}
-            </div>
-            """,
+            f"<div class='step-box'>{'✅' if done else '⬜'} {label}</div>",
             unsafe_allow_html=True,
         )
 
@@ -1118,8 +1193,8 @@ def render_left_explorer(mission: Dict[str, Any]) -> None:
         st.markdown(
             f"""
             <div class='explorer-item'>
-                <b>Input:</b> {t["input"]}<br>
-                <b>Expected:</b> {t["expected"]}
+                <b>Input:</b> <code>{t["input"]}</code> &nbsp;→&nbsp;
+                <b>Expected:</b> <code>{t["expected"]}</code>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1129,108 +1204,111 @@ def render_left_explorer(mission: Dict[str, Any]) -> None:
 def render_right_learning_assistant(mission: Dict[str, Any], feedback: Dict[str, Any] | None) -> None:
     st.markdown("### 🤖 Teaching Assistant")
 
-    st.markdown(
-        """
-        <div class='assistant-card'>
-            <b>How to use this panel</b><br>
-            <span class='muted'>Read the concept first, then run your code, then compare your result with the hints and test feedback.</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    # 1. Smart Diagnosis placed at the top for immediate debugging feedback
+    st.markdown("#### 🧠 Smart Diagnosis & Feedback")
+    if not feedback:
+        st.info("Read the Concept Scaffolds below, write your code, and click **Run** for instant diagnostic feedback.")
+    else:
+        ftype = feedback.get("type")
+        diag_tag = feedback.get("diag_tag", "")
 
-    st.markdown("#### 🎯 Concept Focus")
+        if ftype == "syntax":
+            st.error("**Syntax Issue:** Check missing colons `:`, indentation (4 spaces), or unclosed parentheses.")
+        elif ftype == "missing_function":
+            st.error(f"**Function Name Mismatch:** Keep the exact function name `{mission['function_name']}`.")
+        elif ftype == "timeout":
+            st.error("**Infinite Loop Detected:** Your `while` condition never became False. Check how `b` updates.")
+        elif ftype == "runtime":
+            st.error(f"**Runtime Error:** {feedback.get('message')} — Check variable names or syntax.")
+        elif feedback.get("ok"):
+            st.success("**All Tests Passed!** Pro-tips unlocked in the Concept cards below.")
+        else:
+            if diag_tag == "returned_none":
+                st.warning("**Diagnosis:** Your function returned `None`. Did you forget the `return` statement (or used `print` instead)?")
+            elif diag_tag == "returned_list_instead_of_tuple":
+                st.warning("**Diagnosis:** You returned a `list` `[num, den]`, but a `tuple` `(num, den)` is required. Check **Tuple Return** below.")
+            elif diag_tag == "float_division_used":
+                st.warning("**Diagnosis:** Your result contains floats (e.g. `2.0`). Use integer division `//` instead of `/`.")
+            elif diag_tag == "zero_division":
+                st.warning("**Diagnosis:** Division by zero! Check `if b == 0:` *before* dividing. See **Edge Cases** below.")
+            elif diag_tag == "runtime_in_call":
+                st.warning(f"**Runtime Error:** {feedback.get('message')} — Trace your variables line by line.")
+            else:
+                st.warning(f"**Logic Mismatch:** {feedback.get('message')} Compare your steps with **Common Mistakes** below.")
+
+    # 2. Always-available Concept Scaffolds + Unlockable Pro Tips
+    st.markdown("#### 🎯 Concept Focus (Learning Scaffold)")
     for key in mission["unlocks"]:
         unlocked = key in st.session_state.unlocked_knowledge
         item = KNOWLEDGE_LIBRARY[key]
         cls = "assistant-card-green" if unlocked else "assistant-card"
-        icon = "🔓" if unlocked else "🔒"
+        badge = "🏆 Mastered" if unlocked else "📖 Scaffold"
         st.markdown(
             f"""
             <div class='{cls}'>
-                <b>{icon} {item["title"]}</b><br>
-                <span class='muted'>{item["body"] if unlocked else "Complete the mission to unlock this knowledge card."}</span>
+                <b>{item["title"]}</b> <span class='mini-tag'>{badge}</span><br>
+                <span class='muted'>{item["body"]}</span>
             </div>
             """,
             unsafe_allow_html=True,
         )
+        st.code(item["example"], language="python")
+        if unlocked:
+            st.caption(f"✨ **Unlocked Pro Tip:** {item['pro_tip']}")
 
-    st.markdown("#### 🧩 Common Mistakes")
-    for m in mission["common_mistakes"]:
-        st.write(f"- {m}")
+    # 3. Common Mistakes & Responsible AI Reminder
+    with st.expander("🧩 Common Mistakes to Avoid", expanded=True):
+        for m in mission["common_mistakes"]:
+            st.write(f"- {m}")
 
-    st.markdown("#### 🛡 Responsible AI Reminder")
-    st.markdown(
-        """
-        <div class='assistant-card'>
-            <b>Before asking AI:</b><br>
-            <span class='muted'>
-            1. Try your own logic first<br>
-            2. Ask AI to explain, not just solve<br>
-            3. Check whether the AI answer really matches your task<br>
-            4. Keep human judgement in the final decision
-            </span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("#### 🧠 Feedback Interpretation")
-    if not feedback:
-        st.info("No feedback yet. Run your code first.")
-    else:
-        ftype = feedback.get("type")
-        if ftype == "syntax":
-            st.warning("This is a syntax issue. Check colons, brackets, indentation, or unfinished lines.")
-        elif ftype == "missing_function":
-            st.warning(f"Your function name must be exactly `{mission['function_name']}`.")
-        elif ftype == "runtime":
-            st.warning("Your code runs into an error during execution. Check variable names and operations.")
-        elif ftype == "timeout":
-            st.warning("Your code may be stuck in an infinite loop. Re-check your loop condition.")
-        elif feedback.get("ok"):
-            st.success("Great. Your solution is correct for both visible and hidden tests.")
-        else:
-            st.info("You are close. Re-check logic, return value format, and edge cases.")
+    with st.expander("🛡 Responsible AI Reminder", expanded=False):
+        st.markdown(
+            "1. Try your own logic first\n"
+            "2. Ask AI to explain, not just solve\n"
+            "3. Audit AI output against edge cases\n"
+            "4. Keep human judgement in the final decision"
+        )
 
 
 def render_code_lab_ide() -> None:
-    render_header()
-    st.markdown("---")
-    st.subheader("💻 Code Lab IDE")
-    st.caption("Left: guided learning path · Middle: coding workspace · Right: teaching assistant")
-
     completed = len(st.session_state.completed_missions)
     total = len(MISSIONS)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Missions Completed", f"{completed}/{total}")
-    c2.metric("Knowledge Unlocked", len(st.session_state.unlocked_knowledge))
-    c3.metric("Current Stage Progress", completeness_score())
+
+    top_l, top_r = st.columns([2.2, 1.8])
+    with top_l:
+        st.markdown("### 💻 Code Lab IDE")
+        st.caption("Left: Guided Steps · Middle: Python Workspace · Right: Concepts & Smart Debugging")
+    with top_r:
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Missions", f"{completed}/{total}")
+        m2.metric("Mastered", f"{len(st.session_state.unlocked_knowledge)}/{len(KNOWLEDGE_LIBRARY)}")
+        m3.metric("Stages", completeness_score())
 
     st.progress(completed / total if total else 0.0)
-    st.markdown("---")
 
     mission = get_mission_by_id(st.session_state.selected_mission)
     feedback = st.session_state.mission_feedback.get(mission["id"])
+    current_code = st.session_state.code_buffers[mission["id"]]
 
-    left, middle, right = st.columns([1.05, 1.8, 1.15], gap="large")
+    left, middle, right = st.columns([1.05, 1.85, 1.15], gap="medium")
 
     with left:
-        render_left_explorer(mission)
+        with st.container(height=680):
+            render_left_explorer(mission, current_code)
 
     with middle:
-        st.markdown(f"### 📝 {mission['title']}")
+        st.markdown(f"#### 📝 {mission['title']}")
         code = ace_editor(
-            "Write your Python code here",
-            st.session_state.code_buffers[mission["id"]],
+            "Python Editor",
+            current_code,
             key=f"editor_{mission['id']}",
-            height=420,
+            height=340,
         )
         st.session_state.code_buffers[mission["id"]] = code
 
         b1, b2, b3, b4 = st.columns(4)
         with b1:
-            if st.button("▶ Run / Check", use_container_width=True, key=f"run_{mission['id']}"):
+            if st.button("▶ Run", type="primary", use_container_width=True, key=f"run_{mission['id']}"):
                 result = grade_code(code, mission)
                 st.session_state.mission_feedback[mission["id"]] = result
                 st.session_state.last_checked_mission = mission["id"]
@@ -1239,21 +1317,22 @@ def render_code_lab_ide() -> None:
                 st.rerun()
 
         with b2:
-            if st.button("💡 Show Next Hint", use_container_width=True, key=f"hint_{mission['id']}"):
+            if st.button("💡 Hint", use_container_width=True, key=f"hint_{mission['id']}"):
                 current = st.session_state.hint_levels.get(mission["id"], 0)
                 st.session_state.hint_levels[mission["id"]] = min(current + 1, len(mission["hints"]))
                 st.rerun()
 
         with b3:
-            if st.button("📋 Show Tests", use_container_width=True, key=f"tests_{mission['id']}"):
+            if st.button("📋 Tests", use_container_width=True, key=f"tests_{mission['id']}"):
                 st.session_state.last_checked_mission = mission["id"]
                 st.session_state.mission_feedback.setdefault(
                     mission["id"],
                     {
                         "ok": False,
                         "type": "info",
+                        "diag_tag": "",
                         "level": "partial",
-                        "message": "Visible tests shown below. Write or refine your code, then run the checker.",
+                        "message": "Visible tests shown below. Write or refine your code, then click Run.",
                         "passed": 0,
                         "total": len(mission["public_tests"]) + len(mission["hidden_tests"]),
                         "details": [
@@ -1274,48 +1353,41 @@ def render_code_lab_ide() -> None:
             if st.button("↺ Reset", use_container_width=True, key=f"reset_{mission['id']}"):
                 st.session_state.code_buffers[mission["id"]] = mission["starter_code"]
                 st.session_state.hint_levels[mission["id"]] = 0
-                if mission["id"] in st.session_state.mission_feedback:
-                    del st.session_state.mission_feedback[mission["id"]]
+                st.session_state.mission_feedback.pop(mission["id"], None)
                 st.rerun()
 
-        st.markdown("---")
-        st.markdown("### ✅ Output Console")
+        st.markdown("#### ✅ Output Console")
         render_feedback_panel(feedback, mission)
 
         with st.expander("Why this mission matters", expanded=False):
             st.write(mission["goal"])
-            st.write("This mission is designed to help students connect mathematical logic with executable Python code.")
+            st.write("This mission connects mathematical reasoning directly with modular, testable Python code.")
 
     with right:
-        render_right_learning_assistant(mission, feedback)
+        with st.container(height=680):
+            render_right_learning_assistant(mission, feedback)
 
     st.markdown("---")
-    tab1, tab2 = st.tabs(["📚 Full Knowledge Map", "👩‍🏫 Teacher Live Checker"])
-
-    with tab1:
-        st.subheader("Knowledge Unlock Map")
+    with st.expander("📚 Full Knowledge Map (All Course Concepts)", expanded=False):
         unlocked = set(st.session_state.unlocked_knowledge)
-        for key, item in KNOWLEDGE_LIBRARY.items():
-            if key in unlocked:
-                cls = "knowledge-unlocked"
-                icon = "🔓"
-                body = item["body"]
-            else:
-                cls = "knowledge-locked"
-                icon = "🔒"
-                body = "Complete missions to unlock this concept."
-            st.markdown(
-                f"""
-                <div class='{cls}'>
-                    <b>{icon} {item["title"]}</b><br>
-                    <span class='muted'>{body}</span>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-
-    with tab2:
-        render_teacher_live_checker()
+        cols = st.columns(2)
+        for idx, (key, item) in enumerate(KNOWLEDGE_LIBRARY.items()):
+            with cols[idx % 2]:
+                is_mastered = key in unlocked
+                cls = "knowledge-unlocked" if is_mastered else "assistant-card"
+                badge = "🏆 Mastered" if is_mastered else "📖 Reference"
+                st.markdown(
+                    f"""
+                    <div class='{cls}'>
+                        <b>{item["title"]}</b> <span class='mini-tag'>{badge}</span><br>
+                        <span class='muted'>{item["body"]}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                st.code(item["example"], language="python")
+                if is_mastered:
+                    st.caption(f"✨ **Pro Tip:** {item['pro_tip']}")
 
 
 def render_teacher_live_checker() -> None:
