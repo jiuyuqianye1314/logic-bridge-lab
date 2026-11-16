@@ -72,6 +72,7 @@ st.markdown(
         background: #102A1B;
         border: 1px solid #2B7A4B;
         margin-bottom: 0.6rem;
+        border-left: 5px solid #4CAF50;
     }
     .status-warn {
         padding: 0.8rem 1rem;
@@ -79,6 +80,7 @@ st.markdown(
         background: #2D240E;
         border: 1px solid #A47C1B;
         margin-bottom: 0.6rem;
+        border-left: 5px solid #FF9800;
     }
     .status-bad {
         padding: 0.8rem 1rem;
@@ -86,6 +88,7 @@ st.markdown(
         background: #2B1414;
         border: 1px solid #B04B4B;
         margin-bottom: 0.6rem;
+        border-left: 5px solid #F44336;
     }
     .knowledge-locked {
         padding: 0.8rem;
@@ -171,27 +174,10 @@ SAFE_BUILTINS = {
 }
 
 BLOCKED_NAMES = {
-    "open",
-    "exec",
-    "eval",
-    "compile",
-    "input",
-    "__import__",
-    "globals",
-    "locals",
-    "vars",
-    "dir",
-    "getattr",
-    "setattr",
-    "delattr",
-    "help",
-    "quit",
-    "exit",
-    "os",
-    "sys",
-    "subprocess",
-    "pathlib",
-    "shutil",
+    "open", "exec", "eval", "compile", "input", "__import__",
+    "globals", "locals", "vars", "dir", "getattr", "setattr",
+    "delattr", "help", "quit", "exit", "os", "sys",
+    "subprocess", "pathlib", "shutil",
 }
 
 KNOWLEDGE_LIBRARY = {
@@ -340,15 +326,11 @@ def safe_simplify_fraction(a, b):
     },
 ]
 
+# Optimized Navigation
 PAGES = [
     "1. Home",
-    "2. Think",
-    "3. Pair",
-    "4. GenAI Support",
-    "5. Audit",
-    "6. Reflect",
-    "7. Teacher Dashboard",
-    "8. Code Lab IDE",
+    "2. Learning Workspace",
+    "3. Teacher Dashboard",
 ]
 
 
@@ -393,7 +375,6 @@ def get_mission_by_id(mission_id: str) -> Dict[str, Any]:
 
 
 def check_result_match(result: Any, expected: Any) -> Tuple[bool, str]:
-    """Exact comparison of value and type, returning (is_match, diagnostic_tag)."""
     if result is None:
         return False, "returned_none"
     if isinstance(expected, tuple) and isinstance(result, list):
@@ -416,7 +397,6 @@ def time_limit(seconds: int = 2):
     def signal_handler(signum, frame):
         raise TimeoutException("Code execution timed out (possible infinite loop).")
 
-    # Only enable SIGALRM on Unix main thread to avoid ValueError in Streamlit worker threads
     can_alarm = (
         hasattr(signal, "SIGALRM")
         and threading.current_thread() is threading.main_thread()
@@ -580,19 +560,18 @@ def summary_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
     if not records:
         return pd.DataFrame(
             columns=[
-                "timestamp",
-                "group_id",
-                "class_id",
-                "student_count",
-                "think_done",
-                "pair_done",
-                "genai_done",
-                "audit_done",
-                "reflect_done",
-                "completeness_score",
-                "final_judgement",
-                "missions_completed",
-                "knowledge_unlocked",
+                "Time",
+                "Group ID",
+                "Class",
+                "Students",
+                "Think",
+                "Pair",
+                "GenAI",
+                "Audit",
+                "Reflect",
+                "Progress",
+                "Missions",
+                "Unlocked",
             ]
         )
 
@@ -600,19 +579,18 @@ def summary_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
     for r in records:
         rows.append(
             {
-                "timestamp": r.get("timestamp", ""),
-                "group_id": r.get("group_id", ""),
-                "class_id": r.get("class_id", ""),
-                "student_count": r.get("student_count", ""),
-                "think_done": "✅" if r.get("think_done") else "",
-                "pair_done": "✅" if r.get("pair_done") else "",
-                "genai_done": "✅" if r.get("genai_done") else "",
-                "audit_done": "✅" if r.get("audit_done") else "",
-                "reflect_done": "✅" if r.get("reflect_done") else "",
-                "completeness_score": r.get("completeness_score", ""),
-                "final_judgement": r.get("final_judgement", ""),
-                "missions_completed": len(r.get("missions_completed", [])),
-                "knowledge_unlocked": len(r.get("unlocked_knowledge", [])),
+                "Time": r.get("timestamp", ""),
+                "Group ID": r.get("group_id", ""),
+                "Class": r.get("class_id", ""),
+                "Students": r.get("student_count", ""),
+                "Think": "✅" if r.get("think_done") else "",
+                "Pair": "✅" if r.get("pair_done") else "",
+                "GenAI": "✅" if r.get("genai_done") else "",
+                "Audit": "✅" if r.get("audit_done") else "",
+                "Reflect": "✅" if r.get("reflect_done") else "",
+                "Progress": r.get("completeness_score", ""),
+                "Missions": len(r.get("missions_completed", [])),
+                "Unlocked": len(r.get("unlocked_knowledge", [])),
             }
         )
     return pd.DataFrame(rows)
@@ -802,16 +780,13 @@ def render_header() -> None:
     st.markdown(f"<div class='main-title'>🧠 {PROJECT_TITLE}</div>", unsafe_allow_html=True)
     st.markdown(f"<div class='sub-title'>{PROJECT_TAGLINE}</div>", unsafe_allow_html=True)
 
-    tags = ["Think", "Pair", "GenAI", "Audit", "Reflect", "Code IDE"]
-    st.markdown("".join([f"<span class='mini-tag'>{t}</span>" for t in tags]), unsafe_allow_html=True)
-
 
 def ace_editor(label: str, value: str, key: str, height: int = 340) -> str:
-    st.markdown(f"**{label}**")
+    # Updated to a more standard developer theme
     code = st_ace(
         value=value,
         language="python",
-        theme="monokai",
+        theme="tomorrow_night_eighties",
         key=key,
         height=height,
         font_size=14,
@@ -983,332 +958,236 @@ def render_home() -> None:
         st.markdown(f"**Code Missions Completed:** {summary['missions_completed']}/{len(MISSIONS)}")
 
         st.markdown("---")
-        if st.button("🚀 Open Code Lab IDE", type="primary", use_container_width=True):
-            st.session_state.page = "8. Code Lab IDE"
+        if st.button("🚀 Open Workspace", type="primary", use_container_width=True):
+            st.session_state.page = "2. Learning Workspace"
             st.rerun()
 
 
-def render_think() -> None:
+def render_workspace() -> None:
     render_header()
     st.markdown("---")
-    st.subheader("Think")
-    st.caption("Your notes here will automatically appear inside the Code Lab IDE as your Logic Blueprint.")
+    
+    # Unified Tabs
+    tab_ide, tab_think, tab_pair, tab_genai, tab_audit, tab_reflect = st.tabs([
+        "💻 Code Lab IDE", "📝 1. Think", "🤝 2. Pair", "🤖 3. GenAI", "🔎 4. Audit", "🤔 5. Reflect"
+    ])
+    
+    with tab_ide:
+        render_code_lab_ide()
+        
+    with tab_think:
+        st.subheader("Think Stage")
+        st.caption("Your notes here will automatically appear inside the Code Lab IDE under 'Guide & Notes'.")
+        with st.form("think_form"):
+            think_math = st.text_area(
+                "1) Explain the mathematical logic for simplifying a fraction",
+                value=st.session_state.think_math,
+                height=130,
+                placeholder="Example: To simplify a/b, find the greatest common divisor (gcd) of a and b...",
+            )
+            think_python = st.text_area(
+                "2) Bridge the idea to Python",
+                value=st.session_state.think_python,
+                height=120,
+                placeholder="Example: Use a while loop with modulo (%) to compute gcd(a, b)...",
+            )
+            submitted = st.form_submit_button("Save Think Stage", type="primary")
 
-    with st.form("think_form"):
-        think_math = st.text_area(
-            "1) Explain the mathematical logic for simplifying a fraction",
-            value=st.session_state.think_math,
-            height=130,
-            placeholder="Example: To simplify a/b, find the greatest common divisor (gcd) of a and b, then divide both numbers by their gcd...",
-        )
-        think_python = st.text_area(
-            "2) Bridge the idea to Python",
-            value=st.session_state.think_python,
-            height=120,
-            placeholder="Example: Use a while loop with modulo (%) to compute gcd(a, b), then use integer division // and return a tuple (a // g, b // g)...",
-        )
-        submitted = st.form_submit_button("Save Think Stage", type="primary")
+        if submitted:
+            st.session_state.think_math = think_math
+            st.session_state.think_python = think_python
+            st.session_state.think_done = bool(think_math.strip() or think_python.strip())
+            st.toast("✅ Think stage saved!")
 
-    if submitted:
-        st.session_state.think_math = think_math
-        st.session_state.think_python = think_python
-        st.session_state.think_done = bool(think_math.strip() or think_python.strip())
-        st.success("Think stage saved and synced to your Code Lab IDE.")
+    with tab_pair:
+        st.subheader("Pair Stage")
+        st.caption("Your group pseudocode will also sync to the Code Lab IDE sidebar.")
+        with st.form("pair_form"):
+            pseudocode = st.text_area(
+                "Group pseudocode / algorithm sketch",
+                value=st.session_state.pair_pseudocode,
+                height=150,
+                placeholder="1. Check if b == 0 -> return 'Undefined'\n2. Find g = gcd(a, b)\n3. Return (a // g, b // g)",
+            )
+            roles = st.text_area(
+                "Group roles / collaboration notes",
+                value=st.session_state.pair_roles,
+                height=95,
+            )
+            tests = st.text_area(
+                "Planned test cases",
+                value=st.session_state.pair_tests,
+                height=95,
+            )
+            submitted = st.form_submit_button("Save Pair Stage", type="primary")
 
+        if submitted:
+            st.session_state.pair_pseudocode = pseudocode
+            st.session_state.pair_roles = roles
+            st.session_state.pair_tests = tests
+            st.session_state.pair_done = bool(pseudocode.strip() or roles.strip() or tests.strip())
+            st.toast("✅ Pair stage saved!")
 
-def render_pair() -> None:
-    render_header()
-    st.markdown("---")
-    st.subheader("Pair")
-    st.caption("Your group pseudocode will also sync to the Code Lab IDE sidebar.")
+    with tab_genai:
+        st.subheader("GenAI Support")
+        with st.form("genai_form"):
+            reason = st.text_area("Why are you using AI at this point?", value=st.session_state.genai_reason, height=80)
+            prompt = st.text_area("What prompt would you ask?", value=st.session_state.genai_prompt, height=120)
+            output = st.text_area("What did the AI suggest? (summary only)", value=st.session_state.genai_output, height=110)
+            use_decision = st.text_area("Did you use the suggestion? Why or why not?", value=st.session_state.genai_use, height=110)
+            submitted = st.form_submit_button("Save GenAI Stage", type="primary")
 
-    with st.form("pair_form"):
-        pseudocode = st.text_area(
-            "Group pseudocode / algorithm sketch",
-            value=st.session_state.pair_pseudocode,
-            height=150,
-            placeholder="1. Check if b == 0 -> return 'Undefined'\n2. Find g = gcd(a, b)\n3. Return (a // g, b // g)",
-        )
-        roles = st.text_area(
-            "Group roles / collaboration notes",
-            value=st.session_state.pair_roles,
-            height=95,
-        )
-        tests = st.text_area(
-            "Planned test cases",
-            value=st.session_state.pair_tests,
-            height=95,
-        )
-        submitted = st.form_submit_button("Save Pair Stage", type="primary")
+        if submitted:
+            st.session_state.genai_reason = reason
+            st.session_state.genai_prompt = prompt
+            st.session_state.genai_output = output
+            st.session_state.genai_use = use_decision
+            st.session_state.genai_done = bool(reason.strip() or prompt.strip() or output.strip() or use_decision.strip())
+            st.toast("✅ GenAI stage saved!")
 
-    if submitted:
-        st.session_state.pair_pseudocode = pseudocode
-        st.session_state.pair_roles = roles
-        st.session_state.pair_tests = tests
-        st.session_state.pair_done = bool(pseudocode.strip() or roles.strip() or tests.strip())
-        st.success("Pair stage saved.")
+    with tab_audit:
+        st.subheader("Audit Stage")
+        with st.form("audit_form"):
+            c1, c2 = st.columns(2)
+            with c1:
+                accuracy = st.checkbox("We checked mathematical / code correctness", value=st.session_state.audit_accuracy)
+                clarity = st.checkbox("We checked whether the explanation is clear", value=st.session_state.audit_clarity)
+            with c2:
+                edge_cases = st.checkbox("We checked hidden or edge cases", value=st.session_state.audit_edge_cases)
+                overreliance = st.checkbox("We discussed whether AI is doing too much thinking for us", value=st.session_state.audit_overreliance)
 
+            judgement = st.text_area("Final judgement about the AI support", value=st.session_state.audit_judgement, height=120)
+            submitted = st.form_submit_button("Save Audit Stage", type="primary")
 
-def render_genai() -> None:
-    render_header()
-    st.markdown("---")
-    st.subheader("GenAI Support")
+        if submitted:
+            st.session_state.audit_accuracy = accuracy
+            st.session_state.audit_clarity = clarity
+            st.session_state.audit_edge_cases = edge_cases
+            st.session_state.audit_overreliance = overreliance
+            st.session_state.audit_judgement = judgement
+            st.session_state.audit_done = bool(accuracy or clarity or edge_cases or overreliance or judgement.strip())
+            st.toast("✅ Audit stage saved!")
 
-    with st.form("genai_form"):
-        reason = st.text_area("Why are you using AI at this point?", value=st.session_state.genai_reason, height=80)
-        prompt = st.text_area("What prompt would you ask?", value=st.session_state.genai_prompt, height=120)
-        output = st.text_area("What did the AI suggest? (summary only)", value=st.session_state.genai_output, height=110)
-        use_decision = st.text_area("Did you use the suggestion? Why or why not?", value=st.session_state.genai_use, height=110)
-        submitted = st.form_submit_button("Save GenAI Stage", type="primary")
+    with tab_reflect:
+        st.subheader("Reflect Stage")
+        with st.form("reflect_form"):
+            helpful = st.text_area("What did AI help with?", value=st.session_state.reflect_helpful, height=105)
+            human = st.text_area("What still required human judgement?", value=st.session_state.reflect_human, height=105)
+            next_time = st.text_area("What would you improve next time?", value=st.session_state.reflect_next, height=105)
+            submitted = st.form_submit_button("Save Reflect Stage", type="primary")
 
-    if submitted:
-        st.session_state.genai_reason = reason
-        st.session_state.genai_prompt = prompt
-        st.session_state.genai_output = output
-        st.session_state.genai_use = use_decision
-        st.session_state.genai_done = bool(reason.strip() or prompt.strip() or output.strip() or use_decision.strip())
-        st.success("GenAI stage saved.")
+        if submitted:
+            st.session_state.reflect_helpful = helpful
+            st.session_state.reflect_human = human
+            st.session_state.reflect_next = next_time
+            st.session_state.reflect_done = bool(helpful.strip() or human.strip() or next_time.strip())
+            st.toast("✅ Reflect stage saved!")
 
+        st.markdown("---")
+        st.subheader("Finalize & Submit")
 
-def render_audit() -> None:
-    render_header()
-    st.markdown("---")
-    st.subheader("Audit")
-
-    with st.form("audit_form"):
-        c1, c2 = st.columns(2)
-        with c1:
-            accuracy = st.checkbox("We checked mathematical / code correctness", value=st.session_state.audit_accuracy)
-            clarity = st.checkbox("We checked whether the explanation is clear", value=st.session_state.audit_clarity)
-        with c2:
-            edge_cases = st.checkbox("We checked hidden or edge cases", value=st.session_state.audit_edge_cases)
-            overreliance = st.checkbox("We discussed whether AI is doing too much thinking for us", value=st.session_state.audit_overreliance)
-
-        judgement = st.text_area("Final judgement about the AI support", value=st.session_state.audit_judgement, height=120)
-        submitted = st.form_submit_button("Save Audit Stage", type="primary")
-
-    if submitted:
-        st.session_state.audit_accuracy = accuracy
-        st.session_state.audit_clarity = clarity
-        st.session_state.audit_edge_cases = edge_cases
-        st.session_state.audit_overreliance = overreliance
-        st.session_state.audit_judgement = judgement
-        st.session_state.audit_done = bool(accuracy or clarity or edge_cases or overreliance or judgement.strip())
-        st.success("Audit stage saved.")
-
-
-def render_reflect() -> None:
-    render_header()
-    st.markdown("---")
-    st.subheader("Reflect")
-
-    with st.form("reflect_form"):
-        helpful = st.text_area("What did AI help with?", value=st.session_state.reflect_helpful, height=105)
-        human = st.text_area("What still required human judgement?", value=st.session_state.reflect_human, height=105)
-        next_time = st.text_area("What would you improve next time?", value=st.session_state.reflect_next, height=105)
-        submitted = st.form_submit_button("Save Reflect Stage", type="primary")
-
-    if submitted:
-        st.session_state.reflect_helpful = helpful
-        st.session_state.reflect_human = human
-        st.session_state.reflect_next = next_time
-        st.session_state.reflect_done = bool(helpful.strip() or human.strip() or next_time.strip())
-        st.success("Reflect stage saved.")
-
-    st.markdown("---")
-    st.subheader("Finalize & Submit")
-
-    if st.button("Submit Current Draft", type="primary"):
-        record = build_submission_record()
-        append_submission(record)
-        st.session_state.last_submission_message = f"Submission saved at {record['timestamp']}."
-        st.success(st.session_state.last_submission_message)
-
-    if st.session_state.last_submission_message:
-        st.info(st.session_state.last_submission_message)
-
-
-def render_left_explorer(mission: Dict[str, Any], current_code: str) -> None:
-    st.markdown("### 📁 Learning Explorer")
-
-    for m in MISSIONS:
-        done = "✅" if m["id"] in st.session_state.completed_missions else "⬜"
-        is_current = m["id"] == mission["id"]
-        if st.button(
-            f"{done} {m['title']}",
-            use_container_width=True,
-            key=f"explorer_{m['id']}",
-            type="primary" if is_current else "secondary",
-        ):
-            st.session_state.selected_mission = m["id"]
-            st.rerun()
-
-    # Sync notes from Think & Pair stages directly into the coding workspace
-    if (
-        st.session_state.think_math.strip()
-        or st.session_state.think_python.strip()
-        or st.session_state.pair_pseudocode.strip()
-    ):
-        with st.expander("🧭 Your Logic Blueprint (Think/Pair)", expanded=True):
-            if st.session_state.think_math.strip():
-                st.caption("**Math Logic:**")
-                st.write(st.session_state.think_math)
-            if st.session_state.think_python.strip():
-                st.caption("**Python Bridge:**")
-                st.write(st.session_state.think_python)
-            if st.session_state.pair_pseudocode.strip():
-                st.caption("**Group Pseudocode:**")
-                st.code(st.session_state.pair_pseudocode, language="text")
-
-    st.markdown(
-        f"""
-        <div class='panel-box'>
-            <b>🎯 Current Mission</b><br>
-            <span class='muted'>{mission["goal"]}</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Dynamic step completion tracking
-    code_edited = current_code.strip() != mission["starter_code"].strip()
-    mission_passed = mission["id"] in st.session_state.completed_missions
-
-    st.markdown("### 🪜 Step Guide")
-    steps = [
-        ("1. Understand the math idea", st.session_state.think_done),
-        ("2. Draft pseudocode / plan", st.session_state.pair_done),
-        ("3. Write & test function code", code_edited or mission_passed),
-        ("4. Pass all visible & hidden tests", mission_passed),
-        ("5. Audit & reflect on edge cases", st.session_state.audit_done or st.session_state.reflect_done),
-    ]
-    for label, done in steps:
-        st.markdown(
-            f"<div class='step-box'>{'✅' if done else '⬜'} {label}</div>",
-            unsafe_allow_html=True,
-        )
-
-    st.markdown("### 👀 Public Test Cases")
-    for t in mission["public_tests"]:
-        st.markdown(
-            f"""
-            <div class='explorer-item'>
-                <b>Input:</b> <code>{t["input"]}</code> &nbsp;→&nbsp;
-                <b>Expected:</b> <code>{t["expected"]}</code>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-
-def render_right_learning_assistant(mission: Dict[str, Any], feedback: Dict[str, Any] | None) -> None:
-    st.markdown("### 🤖 Teaching Assistant")
-
-    # 1. Smart Diagnosis placed at the top for immediate debugging feedback
-    st.markdown("#### 🧠 Smart Diagnosis & Feedback")
-    if not feedback:
-        st.info("Read the Concept Scaffolds below, write your code, and click **Run** for instant diagnostic feedback.")
-    else:
-        ftype = feedback.get("type")
-        diag_tag = feedback.get("diag_tag", "")
-
-        if ftype == "syntax":
-            st.error("**Syntax Issue:** Check missing colons `:`, indentation (4 spaces), or unclosed parentheses.")
-        elif ftype == "missing_function":
-            st.error(f"**Function Name Mismatch:** Keep the exact function name `{mission['function_name']}`.")
-        elif ftype == "timeout":
-            st.error("**Infinite Loop Detected:** Your `while` condition never became False. Check how `b` updates.")
-        elif ftype == "runtime":
-            st.error(f"**Runtime Error:** {feedback.get('message')} — Check variable names or syntax.")
-        elif feedback.get("ok"):
-            st.success("**All Tests Passed!** Pro-tips unlocked in the Concept cards below.")
-        else:
-            if diag_tag == "returned_none":
-                st.warning("**Diagnosis:** Your function returned `None`. Did you forget the `return` statement (or used `print` instead)?")
-            elif diag_tag == "returned_list_instead_of_tuple":
-                st.warning("**Diagnosis:** You returned a `list` `[num, den]`, but a `tuple` `(num, den)` is required. Check **Tuple Return** below.")
-            elif diag_tag == "float_division_used":
-                st.warning("**Diagnosis:** Your result contains floats (e.g. `2.0`). Use integer division `//` instead of `/`.")
-            elif diag_tag == "zero_division":
-                st.warning("**Diagnosis:** Division by zero! Check `if b == 0:` *before* dividing. See **Edge Cases** below.")
-            elif diag_tag == "runtime_in_call":
-                st.warning(f"**Runtime Error:** {feedback.get('message')} — Trace your variables line by line.")
-            else:
-                st.warning(f"**Logic Mismatch:** {feedback.get('message')} Compare your steps with **Common Mistakes** below.")
-
-    # 2. Always-available Concept Scaffolds + Unlockable Pro Tips
-    st.markdown("#### 🎯 Concept Focus (Learning Scaffold)")
-    for key in mission["unlocks"]:
-        unlocked = key in st.session_state.unlocked_knowledge
-        item = KNOWLEDGE_LIBRARY[key]
-        cls = "assistant-card-green" if unlocked else "assistant-card"
-        badge = "🏆 Mastered" if unlocked else "📖 Scaffold"
-        st.markdown(
-            f"""
-            <div class='{cls}'>
-                <b>{item["title"]}</b> <span class='mini-tag'>{badge}</span><br>
-                <span class='muted'>{item["body"]}</span>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.code(item["example"], language="python")
-        if unlocked:
-            st.caption(f"✨ **Unlocked Pro Tip:** {item['pro_tip']}")
-
-    # 3. Common Mistakes & Responsible AI Reminder
-    with st.expander("🧩 Common Mistakes to Avoid", expanded=True):
-        for m in mission["common_mistakes"]:
-            st.write(f"- {m}")
-
-    with st.expander("🛡 Responsible AI Reminder", expanded=False):
-        st.markdown(
-            "1. Try your own logic first\n"
-            "2. Ask AI to explain, not just solve\n"
-            "3. Audit AI output against edge cases\n"
-            "4. Keep human judgement in the final decision"
-        )
+        if st.button("Submit Current Draft", type="primary"):
+            record = build_submission_record()
+            append_submission(record)
+            st.session_state.last_submission_message = f"Submission saved at {record['timestamp']}."
+            st.toast(st.session_state.last_submission_message)
 
 
 def render_code_lab_ide() -> None:
-    completed = len(st.session_state.completed_missions)
-    total = len(MISSIONS)
-
-    top_l, top_r = st.columns([2.2, 1.8])
-    with top_l:
-        st.markdown("### 💻 Code Lab IDE")
-        st.caption("Left: Guided Steps · Middle: Python Workspace · Right: Concepts & Smart Debugging")
-    with top_r:
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Missions", f"{completed}/{total}")
-        m2.metric("Mastered", f"{len(st.session_state.unlocked_knowledge)}/{len(KNOWLEDGE_LIBRARY)}")
-        m3.metric("Stages", completeness_score())
-
-    st.progress(completed / total if total else 0.0)
-
     mission = get_mission_by_id(st.session_state.selected_mission)
     feedback = st.session_state.mission_feedback.get(mission["id"])
     current_code = st.session_state.code_buffers[mission["id"]]
 
-    left, middle, right = st.columns([1.05, 1.85, 1.15], gap="medium")
+    left, middle, right = st.columns([1.2, 1.8, 1.0], gap="medium")
 
     with left:
         with st.container(height=680):
-            render_left_explorer(mission, current_code)
+            l_tab1, l_tab2 = st.tabs(["📁 Explorer", "🪜 Guide & Notes"])
+            
+            with l_tab1:
+                for m in MISSIONS:
+                    done = "✅" if m["id"] in st.session_state.completed_missions else "⬜"
+                    is_current = m["id"] == mission["id"]
+                    if st.button(
+                        f"{done} {m['title']}",
+                        use_container_width=True,
+                        key=f"explorer_{m['id']}",
+                        type="primary" if is_current else "secondary",
+                    ):
+                        st.session_state.selected_mission = m["id"]
+                        st.rerun()
+
+                st.markdown(
+                    f"""
+                    <div class='panel-box' style='margin-top: 15px;'>
+                        <b>🎯 Current Goal</b><br>
+                        <span class='muted'>{mission["goal"]}</span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+                
+                st.markdown("### 👀 Public Test Cases")
+                for t in mission["public_tests"]:
+                    st.markdown(
+                        f"""
+                        <div class='explorer-item'>
+                            <b>In:</b> <code>{t["input"]}</code> &nbsp;→&nbsp;
+                            <b>Expected:</b> <code>{t["expected"]}</code>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+            with l_tab2:
+                # Sync notes from Think & Pair stages directly into the coding workspace
+                if (
+                    st.session_state.think_math.strip()
+                    or st.session_state.think_python.strip()
+                    or st.session_state.pair_pseudocode.strip()
+                ):
+                    st.markdown("**🧭 Your Logic Blueprint**")
+                    if st.session_state.think_math.strip():
+                        st.caption("**Math Logic:**")
+                        st.write(st.session_state.think_math)
+                    if st.session_state.think_python.strip():
+                        st.caption("**Python Bridge:**")
+                        st.write(st.session_state.think_python)
+                    if st.session_state.pair_pseudocode.strip():
+                        st.caption("**Group Pseudocode:**")
+                        st.code(st.session_state.pair_pseudocode, language="text")
+                else:
+                    st.info("Complete the 'Think' and 'Pair' tabs to see your Logic Blueprint here.")
+
+                code_edited = current_code.strip() != mission["starter_code"].strip()
+                mission_passed = mission["id"] in st.session_state.completed_missions
+                
+                st.markdown("### 🪜 Checklist")
+                steps = [
+                    ("Understand the math idea", st.session_state.think_done),
+                    ("Draft pseudocode / plan", st.session_state.pair_done),
+                    ("Write & test function code", code_edited or mission_passed),
+                    ("Pass all tests", mission_passed),
+                    ("Audit & reflect", st.session_state.audit_done or st.session_state.reflect_done),
+                ]
+                for label, done in steps:
+                    st.markdown(
+                        f"<div class='step-box'>{'✅' if done else '⬜'} {label}</div>",
+                        unsafe_allow_html=True,
+                    )
 
     with middle:
-        st.markdown(f"#### 📝 {mission['title']}")
         code = ace_editor(
-            "Python Editor",
+            "Python Workspace",
             current_code,
             key=f"editor_{mission['id']}",
-            height=340,
+            height=350,
         )
         st.session_state.code_buffers[mission["id"]] = code
 
         b1, b2, b3, b4 = st.columns(4)
         with b1:
-            if st.button("▶ Run", type="primary", use_container_width=True, key=f"run_{mission['id']}"):
+            if st.button("▶ Run Code", type="primary", use_container_width=True, key=f"run_{mission['id']}"):
                 result = grade_code(code, mission)
                 st.session_state.mission_feedback[mission["id"]] = result
                 st.session_state.last_checked_mission = mission["id"]
@@ -1323,7 +1202,7 @@ def render_code_lab_ide() -> None:
                 st.rerun()
 
         with b3:
-            if st.button("📋 Tests", use_container_width=True, key=f"tests_{mission['id']}"):
+            if st.button("📋 Test Results", use_container_width=True, key=f"tests_{mission['id']}"):
                 st.session_state.last_checked_mission = mission["id"]
                 st.session_state.mission_feedback.setdefault(
                     mission["id"],
@@ -1359,35 +1238,68 @@ def render_code_lab_ide() -> None:
         st.markdown("#### ✅ Output Console")
         render_feedback_panel(feedback, mission)
 
-        with st.expander("Why this mission matters", expanded=False):
-            st.write(mission["goal"])
-            st.write("This mission connects mathematical reasoning directly with modular, testable Python code.")
-
     with right:
         with st.container(height=680):
-            render_right_learning_assistant(mission, feedback)
+            st.markdown("### 🤖 Assistant")
+            
+            # Smart Diagnosis
+            if not feedback:
+                st.info("Write your code and click **Run** for instant diagnostic feedback.")
+            else:
+                ftype = feedback.get("type")
+                diag_tag = feedback.get("diag_tag", "")
 
-    st.markdown("---")
-    with st.expander("📚 Full Knowledge Map (All Course Concepts)", expanded=False):
-        unlocked = set(st.session_state.unlocked_knowledge)
-        cols = st.columns(2)
-        for idx, (key, item) in enumerate(KNOWLEDGE_LIBRARY.items()):
-            with cols[idx % 2]:
-                is_mastered = key in unlocked
-                cls = "knowledge-unlocked" if is_mastered else "assistant-card"
-                badge = "🏆 Mastered" if is_mastered else "📖 Reference"
-                st.markdown(
-                    f"""
-                    <div class='{cls}'>
-                        <b>{item["title"]}</b> <span class='mini-tag'>{badge}</span><br>
-                        <span class='muted'>{item["body"]}</span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.code(item["example"], language="python")
-                if is_mastered:
-                    st.caption(f"✨ **Pro Tip:** {item['pro_tip']}")
+                if ftype == "syntax":
+                    st.error("**Syntax Issue:** Check colons `:`, indentation, or parentheses.")
+                elif ftype == "missing_function":
+                    st.error(f"**Function Mismatch:** Use exact name `{mission['function_name']}`.")
+                elif ftype == "timeout":
+                    st.error("**Infinite Loop:** Condition never became False.")
+                elif ftype == "runtime":
+                    st.error(f"**Runtime Error:** {feedback.get('message')}")
+                elif feedback.get("ok"):
+                    st.success("**All Tests Passed!**")
+                else:
+                    if diag_tag == "returned_none":
+                        st.warning("**Diagnosis:** Returned `None`. Forgot `return`?")
+                    elif diag_tag == "returned_list_instead_of_tuple":
+                        st.warning("**Diagnosis:** Returned `list` instead of `tuple`.")
+                    elif diag_tag == "float_division_used":
+                        st.warning("**Diagnosis:** Contains floats. Use `//` instead of `/`.")
+                    elif diag_tag == "zero_division":
+                        st.warning("**Diagnosis:** Division by zero! Check `b == 0` first.")
+                    else:
+                        st.warning(f"**Logic Mismatch:** {feedback.get('message')}")
+
+            # Concept Scaffolds (Expander for noise reduction)
+            with st.expander("📚 Concept Scaffolds (Unlocks)", expanded=True):
+                for key in mission["unlocks"]:
+                    unlocked = key in st.session_state.unlocked_knowledge
+                    item = KNOWLEDGE_LIBRARY[key]
+                    cls = "assistant-card-green" if unlocked else "assistant-card"
+                    badge = "🏆 Mastered" if unlocked else "📖 Scaffold"
+                    st.markdown(
+                        f"""
+                        <div class='{cls}'>
+                            <b>{item["title"]}</b> <span class='mini-tag'>{badge}</span><br>
+                            <span class='muted'>{item["body"]}</span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    st.code(item["example"], language="python")
+
+            # Common Mistakes
+            with st.expander("🧩 Common Mistakes", expanded=False):
+                for m in mission["common_mistakes"]:
+                    st.write(f"- {m}")
+                    
+            with st.expander("🌐 Full Knowledge Map", expanded=False):
+                unlocked_set = set(st.session_state.unlocked_knowledge)
+                for key, item in KNOWLEDGE_LIBRARY.items():
+                    is_mastered = key in unlocked_set
+                    badge = "🏆" if is_mastered else "🔒"
+                    st.markdown(f"**{item['title']}** {badge}")
 
 
 def render_teacher_live_checker() -> None:
@@ -1425,26 +1337,29 @@ def render_teacher_live_checker() -> None:
     if st.session_state.teacher_live_feedback:
         render_feedback_panel(st.session_state.teacher_live_feedback, mission)
 
-    with st.expander("Suggested teacher talk"):
-        st.write(
-            "Use this checker formatively: show students that 'incorrect' does not always mean 'bad', "
-            "and 'correct on visible tests' does not always mean 'fully robust'."
-        )
-
 
 def render_teacher_dashboard() -> None:
     render_header()
     st.markdown("---")
-    st.subheader("Teacher Dashboard")
 
     records = load_submissions()
     summary_df = summary_dataframe(records)
 
-    tab1, tab2, tab3 = st.tabs(["Submission Table", "Live Code Checker", "Evidence Export"])
+    tab1, tab2, tab3 = st.tabs(["📊 Submissions & Charts", "💻 Live Checker", "⬇️ Evidence Export"])
 
     with tab1:
-        st.caption("This table shows saved submission summaries from the current app storage.")
-        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        st.subheader("Submissions Dashboard")
+        c1, c2 = st.columns([2, 1])
+        with c1:
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        with c2:
+            if not summary_df.empty:
+                st.markdown("**Progress Score Distribution**")
+                # Count frequencies of completeness scores (e.g. '5/5', '3/5')
+                chart_data = summary_df["Progress"].value_counts().sort_index()
+                st.bar_chart(chart_data)
+            else:
+                st.info("No submissions yet.")
 
     with tab2:
         render_teacher_live_checker()
@@ -1470,7 +1385,6 @@ def render_teacher_dashboard() -> None:
         st.markdown("---")
         st.write("- Use coded group IDs rather than personal identifiers.")
         st.write("- Local file storage is suitable for prototype/demo use.")
-        st.write("- For long-term use, connect to approved secure storage.")
 
 
 # =========================================================
@@ -1484,20 +1398,10 @@ def main() -> None:
 
     if page == "1. Home":
         render_home()
-    elif page == "2. Think":
-        render_think()
-    elif page == "3. Pair":
-        render_pair()
-    elif page == "4. GenAI Support":
-        render_genai()
-    elif page == "5. Audit":
-        render_audit()
-    elif page == "6. Reflect":
-        render_reflect()
-    elif page == "7. Teacher Dashboard":
+    elif page == "2. Learning Workspace":
+        render_workspace()
+    elif page == "3. Teacher Dashboard":
         render_teacher_dashboard()
-    elif page == "8. Code Lab IDE":
-        render_code_lab_ide()
     else:
         render_home()
 
