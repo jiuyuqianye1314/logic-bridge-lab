@@ -25,7 +25,7 @@ st.set_page_config(
 )
 
 # =========================================================
-# STYLE
+# STYLE (With explicit light text colors for Dark/Light mode safety)
 # =========================================================
 st.markdown(
     """
@@ -54,14 +54,16 @@ st.markdown(
     .panel-box {
         padding: 0.85rem 1rem;
         border-radius: 12px;
-        background: rgba(255,255,255,0.04);
-        border: 1px solid rgba(255,255,255,0.08);
+        background: #161B2E;
+        color: #F0F2F6;
+        border: 1px solid #2C3559;
         margin-bottom: 0.85rem;
     }
     .step-box {
         padding: 0.65rem 0.85rem;
         border-radius: 10px;
         background: #151A2D;
+        color: #F0F2F6;
         border: 1px solid #2C3559;
         margin-bottom: 0.5rem;
         font-size: 0.92rem;
@@ -70,6 +72,7 @@ st.markdown(
         padding: 0.8rem 1rem;
         border-radius: 10px;
         background: #102A1B;
+        color: #E8F5E9;
         border: 1px solid #2B7A4B;
         margin-bottom: 0.6rem;
         border-left: 5px solid #4CAF50;
@@ -78,6 +81,7 @@ st.markdown(
         padding: 0.8rem 1rem;
         border-radius: 10px;
         background: #2D240E;
+        color: #FFF8E1;
         border: 1px solid #A47C1B;
         margin-bottom: 0.6rem;
         border-left: 5px solid #FF9800;
@@ -86,6 +90,7 @@ st.markdown(
         padding: 0.8rem 1rem;
         border-radius: 10px;
         background: #2B1414;
+        color: #FFEBEE;
         border: 1px solid #B04B4B;
         margin-bottom: 0.6rem;
         border-left: 5px solid #F44336;
@@ -95,6 +100,7 @@ st.markdown(
         border-radius: 10px;
         border: 1px solid #505050;
         background: #171717;
+        color: #E0E0E0;
         margin-bottom: 0.6rem;
     }
     .knowledge-unlocked {
@@ -102,6 +108,7 @@ st.markdown(
         border-radius: 10px;
         border: 1px solid #2D7D46;
         background: #13291C;
+        color: #E8F5E9;
         margin-bottom: 0.6rem;
     }
     .muted {
@@ -113,6 +120,7 @@ st.markdown(
         border-radius: 10px;
         border: 1px solid #2C3559;
         background: #111629;
+        color: #F0F2F6;
         margin-bottom: 0.45rem;
         font-size: 0.9rem;
     }
@@ -121,6 +129,7 @@ st.markdown(
         border-radius: 12px;
         border: 1px solid #39436F;
         background: #141C33;
+        color: #F0F2F6;
         margin-bottom: 0.55rem;
     }
     .assistant-card-green {
@@ -128,6 +137,7 @@ st.markdown(
         border-radius: 12px;
         border: 1px solid #2D7D46;
         background: #13291C;
+        color: #E8F5E9;
         margin-bottom: 0.55rem;
     }
     </style>
@@ -326,7 +336,6 @@ def safe_simplify_fraction(a, b):
     },
 ]
 
-# Optimized Navigation
 PAGES = [
     "1. Home",
     "2. Learning Workspace",
@@ -449,6 +458,7 @@ def init_session() -> None:
         "unlocked_knowledge": [],
         "mission_feedback": {},
         "hint_levels": {m["id"]: 0 for m in MISSIONS},
+        "run_counts": {m["id"]: 0 for m in MISSIONS},
         "code_buffers": {m["id"]: m["starter_code"] for m in MISSIONS},
         "last_submission_message": "",
         "teacher_live_code": "",
@@ -459,6 +469,42 @@ def init_session() -> None:
     for k, v in defaults.items():
         if k not in st.session_state:
             st.session_state[k] = v
+
+
+def reset_all_draft_and_lab() -> None:
+    st.session_state.group_id = ""
+    st.session_state.class_id = ""
+    st.session_state.think_math = ""
+    st.session_state.think_python = ""
+    st.session_state.pair_pseudocode = ""
+    st.session_state.pair_roles = ""
+    st.session_state.pair_tests = ""
+    st.session_state.genai_reason = ""
+    st.session_state.genai_prompt = ""
+    st.session_state.genai_output = ""
+    st.session_state.genai_use = ""
+    st.session_state.audit_accuracy = False
+    st.session_state.audit_clarity = False
+    st.session_state.audit_edge_cases = False
+    st.session_state.audit_overreliance = False
+    st.session_state.audit_judgement = ""
+    st.session_state.reflect_helpful = ""
+    st.session_state.reflect_human = ""
+    st.session_state.reflect_next = ""
+    st.session_state.think_done = False
+    st.session_state.pair_done = False
+    st.session_state.genai_done = False
+    st.session_state.audit_done = False
+    st.session_state.reflect_done = False
+    st.session_state.selected_mission = MISSIONS[0]["id"]
+    st.session_state.completed_missions = []
+    st.session_state.unlocked_knowledge = []
+    st.session_state.mission_feedback = {}
+    st.session_state.hint_levels = {m["id"]: 0 for m in MISSIONS}
+    st.session_state.run_counts = {m["id"]: 0 for m in MISSIONS}
+    st.session_state.code_buffers = {m["id"]: m["starter_code"] for m in MISSIONS}
+    st.session_state.last_submission_message = ""
+    st.session_state.last_checked_mission = None
 
 
 def current_stage_flags() -> Dict[str, bool]:
@@ -531,6 +577,8 @@ def build_evidence_archive() -> Dict[str, Any]:
         "code_lab": {
             "completed_missions": st.session_state.completed_missions,
             "unlocked_knowledge": st.session_state.unlocked_knowledge,
+            "hints_used": dict(st.session_state.hint_levels),
+            "run_counts": dict(st.session_state.run_counts),
             "latest_feedback": st.session_state.mission_feedback,
         },
     }
@@ -552,6 +600,8 @@ def build_submission_record() -> Dict[str, Any]:
         "final_judgement": st.session_state.audit_judgement or "Not set",
         "missions_completed": list(st.session_state.completed_missions),
         "unlocked_knowledge": list(st.session_state.unlocked_knowledge),
+        "total_hints_used": sum(st.session_state.hint_levels.values()),
+        "total_code_runs": sum(st.session_state.run_counts.values()),
         "evidence_archive": build_evidence_archive(),
     }
 
@@ -571,6 +621,8 @@ def summary_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
                 "Reflect",
                 "Progress",
                 "Missions",
+                "Hints",
+                "Runs",
                 "Unlocked",
             ]
         )
@@ -590,6 +642,8 @@ def summary_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
                 "Reflect": "✅" if r.get("reflect_done") else "",
                 "Progress": r.get("completeness_score", ""),
                 "Missions": len(r.get("missions_completed", [])),
+                "Hints": r.get("total_hints_used", 0),
+                "Runs": r.get("total_code_runs", 0),
                 "Unlocked": len(r.get("unlocked_knowledge", [])),
             }
         )
@@ -781,8 +835,7 @@ def render_header() -> None:
     st.markdown(f"<div class='sub-title'>{PROJECT_TAGLINE}</div>", unsafe_allow_html=True)
 
 
-def ace_editor(label: str, value: str, key: str, height: int = 340) -> str:
-    # Updated to a more standard developer theme
+def ace_editor(label: str, value: str, key: str, height: int = 310) -> str:
     code = st_ace(
         value=value,
         language="python",
@@ -854,9 +907,17 @@ def render_sidebar() -> None:
         st.session_state.page = page
 
         st.markdown("---")
-        with st.expander("Current Group Setup", expanded=(page == "1. Home")):
-            st.session_state.group_id = st.text_input("Group ID", value=st.session_state.group_id)
-            st.session_state.class_id = st.text_input("Class / Tutorial Group", value=st.session_state.class_id)
+        with st.expander("Current Group Setup", expanded=True):
+            st.session_state.group_id = st.text_input(
+                "Anonymous Group / Tester ID",
+                value=st.session_state.group_id,
+                placeholder="e.g., Beta_01",
+            )
+            st.session_state.class_id = st.text_input(
+                "Class / Session Tag",
+                value=st.session_state.class_id,
+                placeholder="e.g., PeerTest_A",
+            )
             st.session_state.student_count = st.number_input(
                 "Number of Students in Group",
                 min_value=1,
@@ -879,30 +940,15 @@ def render_sidebar() -> None:
         st.write(f"{'✅' if st.session_state.reflect_done else '⬜'} Reflect")
 
         st.markdown("---")
-        if st.button("Reset Current Draft", use_container_width=True):
-            st.session_state.think_math = ""
-            st.session_state.think_python = ""
-            st.session_state.pair_pseudocode = ""
-            st.session_state.pair_roles = ""
-            st.session_state.pair_tests = ""
-            st.session_state.genai_reason = ""
-            st.session_state.genai_prompt = ""
-            st.session_state.genai_output = ""
-            st.session_state.genai_use = ""
-            st.session_state.audit_accuracy = False
-            st.session_state.audit_clarity = False
-            st.session_state.audit_edge_cases = False
-            st.session_state.audit_overreliance = False
-            st.session_state.audit_judgement = ""
-            st.session_state.reflect_helpful = ""
-            st.session_state.reflect_human = ""
-            st.session_state.reflect_next = ""
-            st.session_state.think_done = False
-            st.session_state.pair_done = False
-            st.session_state.genai_done = False
-            st.session_state.audit_done = False
-            st.session_state.reflect_done = False
-            st.session_state.last_submission_message = ""
+        if st.button("💾 Submit Progress", type="primary", use_container_width=True):
+            record = build_submission_record()
+            append_submission(record)
+            st.session_state.last_submission_message = f"Saved at {record['timestamp']}."
+            st.toast(f"✅ {st.session_state.last_submission_message}")
+
+        if st.button("🔄 Reset Current Session", use_container_width=True):
+            reset_all_draft_and_lab()
+            st.toast("🔄 Session and code workspace reset for next tester!")
             st.rerun()
 
 
@@ -966,15 +1012,14 @@ def render_home() -> None:
 def render_workspace() -> None:
     render_header()
     st.markdown("---")
-    
-    # Unified Tabs
+
     tab_ide, tab_think, tab_pair, tab_genai, tab_audit, tab_reflect = st.tabs([
         "💻 Code Lab IDE", "📝 1. Think", "🤝 2. Pair", "🤖 3. GenAI", "🔎 4. Audit", "🤔 5. Reflect"
     ])
-    
+
     with tab_ide:
         render_code_lab_ide()
-        
+
     with tab_think:
         st.subheader("Think Stage")
         st.caption("Your notes here will automatically appear inside the Code Lab IDE under 'Guide & Notes'.")
@@ -1101,9 +1146,9 @@ def render_code_lab_ide() -> None:
     left, middle, right = st.columns([1.2, 1.8, 1.0], gap="medium")
 
     with left:
-        with st.container(height=680):
+        with st.container(height=580):
             l_tab1, l_tab2 = st.tabs(["📁 Explorer", "🪜 Guide & Notes"])
-            
+
             with l_tab1:
                 for m in MISSIONS:
                     done = "✅" if m["id"] in st.session_state.completed_missions else "⬜"
@@ -1126,7 +1171,7 @@ def render_code_lab_ide() -> None:
                     """,
                     unsafe_allow_html=True,
                 )
-                
+
                 st.markdown("### 👀 Public Test Cases")
                 for t in mission["public_tests"]:
                     st.markdown(
@@ -1140,7 +1185,7 @@ def render_code_lab_ide() -> None:
                     )
 
             with l_tab2:
-                # Sync notes from Think & Pair stages directly into the coding workspace
+                st.caption("💡 Tip: Fill in the '1. Think' and '2. Pair' tabs first to sync your Logic Blueprint here.")
                 if (
                     st.session_state.think_math.strip()
                     or st.session_state.think_python.strip()
@@ -1161,7 +1206,7 @@ def render_code_lab_ide() -> None:
 
                 code_edited = current_code.strip() != mission["starter_code"].strip()
                 mission_passed = mission["id"] in st.session_state.completed_missions
-                
+
                 st.markdown("### 🪜 Checklist")
                 steps = [
                     ("Understand the math idea", st.session_state.think_done),
@@ -1181,13 +1226,14 @@ def render_code_lab_ide() -> None:
             "Python Workspace",
             current_code,
             key=f"editor_{mission['id']}",
-            height=350,
+            height=310,
         )
         st.session_state.code_buffers[mission["id"]] = code
 
         b1, b2, b3, b4 = st.columns(4)
         with b1:
             if st.button("▶ Run Code", type="primary", use_container_width=True, key=f"run_{mission['id']}"):
+                st.session_state.run_counts[mission["id"]] = st.session_state.run_counts.get(mission["id"], 0) + 1
                 result = grade_code(code, mission)
                 st.session_state.mission_feedback[mission["id"]] = result
                 st.session_state.last_checked_mission = mission["id"]
@@ -1239,10 +1285,9 @@ def render_code_lab_ide() -> None:
         render_feedback_panel(feedback, mission)
 
     with right:
-        with st.container(height=680):
+        with st.container(height=580):
             st.markdown("### 🤖 Assistant")
-            
-            # Smart Diagnosis
+
             if not feedback:
                 st.info("Write your code and click **Run** for instant diagnostic feedback.")
             else:
@@ -1271,7 +1316,6 @@ def render_code_lab_ide() -> None:
                     else:
                         st.warning(f"**Logic Mismatch:** {feedback.get('message')}")
 
-            # Concept Scaffolds (Expander for noise reduction)
             with st.expander("📚 Concept Scaffolds (Unlocks)", expanded=True):
                 for key in mission["unlocks"]:
                     unlocked = key in st.session_state.unlocked_knowledge
@@ -1289,11 +1333,10 @@ def render_code_lab_ide() -> None:
                     )
                     st.code(item["example"], language="python")
 
-            # Common Mistakes
             with st.expander("🧩 Common Mistakes", expanded=False):
                 for m in mission["common_mistakes"]:
                     st.write(f"- {m}")
-                    
+
             with st.expander("🌐 Full Knowledge Map", expanded=False):
                 unlocked_set = set(st.session_state.unlocked_knowledge)
                 for key, item in KNOWLEDGE_LIBRARY.items():
@@ -1355,7 +1398,6 @@ def render_teacher_dashboard() -> None:
         with c2:
             if not summary_df.empty:
                 st.markdown("**Progress Score Distribution**")
-                # Count frequencies of completeness scores (e.g. '5/5', '3/5')
                 chart_data = summary_df["Progress"].value_counts().sort_index()
                 st.bar_chart(chart_data)
             else:
