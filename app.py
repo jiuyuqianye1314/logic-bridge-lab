@@ -410,6 +410,15 @@ def get_mission_by_id(mission_id: str) -> Dict[str, Any]:
     return MISSIONS[0]
 
 
+def get_unlock_source_label(concept_key: str) -> str:
+    """Returns which mission(s) unlock a given knowledge concept."""
+    sources = []
+    for idx, m in enumerate(MISSIONS, start=1):
+        if concept_key in m["unlocks"]:
+            sources.append(f"Mission {idx}")
+    return " or ".join(sources) if sources else "Code Missions"
+
+
 def check_result_match(result: Any, expected: Any) -> Tuple[bool, str]:
     if result is None:
         return False, "returned_none"
@@ -856,7 +865,7 @@ def grade_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
     success = passed == total_tests
 
     if success:
-        msg = "Excellent! Your code passed all public and hidden tests."
+        msg = "Excellent! Your code passed all public and hidden tests — new Knowledge Map badges unlocked!"
         level = "correct"
     else:
         public_failed = [d for d in details if d["public"] and not d["ok"]]
@@ -973,11 +982,11 @@ def render_sidebar() -> None:
         st.session_state.page = page
 
         st.markdown("---")
-        with st.expander("Current Group Setup", expanded=True):
+        with st.expander("1️⃣ Step 1: Anonymous Setup", expanded=True):
             raw_group_id = st.text_input(
                 "Anonymous Tester / Group ID",
                 value=st.session_state.group_id,
-                placeholder="e.g., MIT_01 (No real names)",
+                placeholder="e.g., MIT_01 (Press Enter)",
             )
             id_valid, id_err = is_valid_anonymous_id(raw_group_id)
             if not id_valid:
@@ -999,20 +1008,21 @@ def render_sidebar() -> None:
             )
 
         st.markdown("---")
-        st.markdown("### Progress")
+        st.markdown("### 📊 Progress & Unlocks")
         flags = current_stage_flags()
         done = sum(flags.values())
         st.progress(done / 5)
         st.write(f"{done}/5 stages · {len(st.session_state.completed_missions)}/{len(MISSIONS)} missions")
 
-        st.write(f"{'✅' if st.session_state.think_done else '⬜'} Think")
-        st.write(f"{'✅' if st.session_state.pair_done else '⬜'} Pair")
-        st.write(f"{'✅' if st.session_state.genai_done else '⬜'} GenAI")
+        st.write(f"{'✅' if st.session_state.think_done else '⬜'} Think (Unlocks Blueprint)")
+        st.write(f"{'✅' if st.session_state.pair_done else '⬜'} Pair (Unlocks Pseudocode)")
+        st.write(f"{'✅' if st.session_state.genai_done else '⬜'} GenAI Support")
         st.write(f"{'✅' if st.session_state.audit_done else '⬜'} Audit")
         st.write(f"{'✅' if st.session_state.reflect_done else '⬜'} Reflect")
+        st.caption("Click 'Save ... Stage' inside each tab to check off items above.")
 
         st.markdown("---")
-        st.markdown("### Voluntary Consent & Save")
+        st.markdown("### 💾 Final Save & Submit")
         st.session_state.consent_agreed = st.checkbox(
             "I voluntarily share this anonymous session for tool usability improvement (unrelated to course grades).",
             value=st.session_state.consent_agreed,
@@ -1032,7 +1042,7 @@ def render_sidebar() -> None:
             st.toast(f"✅ {st.session_state.last_submission_message}")
 
         if not st.session_state.consent_agreed:
-            st.caption("Tick the voluntary consent box above to enable saving.")
+            st.caption("Tick the voluntary consent box above to unlock the Submit button.")
 
         if st.button("🔄 Reset Current Session", use_container_width=True):
             reset_all_draft_and_lab()
@@ -1067,7 +1077,7 @@ def render_home() -> None:
             <div class='guide-card'>
                 <div class='guide-step-badge'>STEP 1 · SETUP</div><br>
                 <b>Set Anonymous ID</b><br>
-                <span class='muted'>In the left sidebar under <b>Current Group Setup</b>, enter a random code like <code>MIT_01</code>.</span>
+                <span class='muted'>In the left sidebar under <b>Anonymous Setup</b>, enter a random code like <code>MIT_01</code> and press Enter.</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1076,9 +1086,9 @@ def render_home() -> None:
         st.markdown(
             """
             <div class='guide-card'>
-                <div class='guide-step-badge'>STEP 2 · PLAN</div><br>
-                <b>Think & Pair First</b><br>
-                <span class='muted'>Jot down your math logic in <b>1. Think</b> and pseudocode in <b>2. Pair</b>. Your notes auto-sync into the IDE!</span>
+                <div class='guide-step-badge'>STEP 2 · SAVE & SYNC</div><br>
+                <b>Save Think & Pair</b><br>
+                <span class='muted'>Write your math plan in <b>1. Think</b> & <b>2. Pair</b> and click <b>Save Stage</b>. This unlocks your synced <i>Logic Blueprint</i> inside the IDE!</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1087,9 +1097,9 @@ def render_home() -> None:
         st.markdown(
             """
             <div class='guide-card'>
-                <div class='guide-step-badge'>STEP 3 · CODE & UNLOCK</div><br>
-                <b>Solve IDE Missions</b><br>
-                <span class='muted'>Write Python in <b>💻 Code Lab IDE</b>, click <b>▶ Run Code</b>, use <b>💡 Hint</b> if stuck, and unlock badges (🔒 → 🏆).</span>
+                <div class='guide-step-badge'>STEP 3 · PASS & UNLOCK</div><br>
+                <b>Solve Missions (🔒 → 🏆)</b><br>
+                <span class='muted'>Write Python in <b>💻 Code Lab IDE</b> and click <b>▶ Run Code</b>. Passing all tests unlocks locked tutorials in the Knowledge Map!</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1098,9 +1108,42 @@ def render_home() -> None:
         st.markdown(
             """
             <div class='guide-card'>
-                <div class='guide-step-badge'>STEP 4 · SUBMIT</div><br>
-                <b>Consent & Save</b><br>
-                <span class='muted'>Complete <b>3. GenAI</b> to <b>5. Reflect</b> (optional), tick the voluntary consent box on the left, and click <b>💾 Submit Progress</b>.</span>
+                <div class='guide-step-badge'>STEP 4 · FINAL SUBMIT</div><br>
+                <b>Consent & Archive</b><br>
+                <span class='muted'>Save <b>3. GenAI</b> to <b>5. Reflect</b>, tick the voluntary consent box on the left sidebar, and click <b>💾 Submit Progress</b>.</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # Detailed Explanation of How Saving & Unlocking Works
+    st.subheader("🔓 How Saving Answers & Unlocking Tutorials Works")
+    u1, u2 = st.columns(2)
+    with u1:
+        st.markdown(
+            """
+            <div class='panel-box'>
+                <b>1. How Saving Text Answers Unlocks Your Logic Blueprint</b><br><br>
+                <ul>
+                    <li>Inside <b>📝 1. Think</b> and <b>🤝 2. Pair</b>, typing alone does not sync—you must click the blue <b>Save Think Stage</b> / <b>Save Pair Stage</b> button at the bottom of each form.</li>
+                    <li>Once saved, the left sidebar updates from <code>⬜</code> to <code>✅</code>, and your notes automatically unlock inside <b>💻 Code Lab IDE → 🪜 Guide & Notes</b> as your personal <i>Logic Blueprint</i>.</li>
+                    <li>Similarly, in <b>3. GenAI</b>, <b>4. Audit</b>, and <b>5. Reflect</b>, click each tab's <b>Save Stage</b> button before final submission.</li>
+                </ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with u2:
+        st.markdown(
+            """
+            <div class='panel-box'>
+                <b>2. How Passing Missions Unlocks Tutorials (🔒 → 🏆)</b><br><br>
+                <ul>
+                    <li>Locked items in <b>🌐 Full Knowledge Map</b> are unlocked by writing Python code and passing all public & hidden tests via <b>▶ Run Code</b>:</li>
+                    <li><b>Mission 1 (<code>gcd</code>):</b> Unlocks <i>Modulo (%)</i>, <i>while loop</i>, and <i>Testing Mindset</i>.</li>
+                    <li><b>Mission 2 (<code>simplify_fraction</code>):</b> Unlocks <i>Function Reuse</i>, <i>Tuple Return & Integer Division</i>, and <i>Debugging Strategy</i>.</li>
+                    <li><b>Mission 3 (<code>safe_simplify_fraction</code>):</b> Unlocks <i>Edge Cases (Guard Clause)</i>.</li>
+                </ul>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1148,33 +1191,51 @@ def render_home() -> None:
 def render_workspace() -> None:
     render_header()
 
-    with st.expander("📖 Student Quick Guide: How to Use This Workspace (Click to expand)", expanded=False):
-        c1, c2, c3 = st.columns(3)
-        with c1:
+    # Interactive 4-Tab Detailed Student Manual inside Workspace
+    with st.expander("📖 Student Guide: How to Save Answers, Unlock Tutorials & Submit (Click to expand)", expanded=False):
+        gtab1, gtab2, gtab3, gtab4 = st.tabs([
+            "1️⃣ Setup & Think/Pair Sync",
+            "2️⃣ Code Lab & Unlocks (🔒→🏆)",
+            "3️⃣ GenAI, Audit & Reflect",
+            "4️⃣ Final Submit & Shared Laptop Reset",
+        ])
+
+        with gtab1:
             st.markdown(
                 """
-                **1. Left Panel (Missions & Blueprint)**
-                * Switch between **Mission 1 (`gcd`)**, **Mission 2 (`simplify_fraction`)**, and **Mission 3 (`safe_simplify_fraction`)**.
-                * Check **Public Test Cases** at the bottom.
-                * Switch to **🪜 Guide & Notes** to view your synced *Think & Pair* notes.
+                * **Step A — Set Anonymous ID (Left Sidebar):** Enter a random code like `MIT_01` under *Anonymous Setup* and press Enter (do **not** use your real name or Student ID).
+                * **Step B — Save `📝 1. Think` & `🤝 2. Pair`:** Write your math explanation and pseudocode, then **click the blue `Save Think Stage` / `Save Pair Stage` button** at the bottom of each form.
+                * **Step C — Check Your Unlocked Blueprint:** Once saved, the sidebar turns `✅`, and your notes automatically appear inside **💻 Code Lab IDE → Left Panel → `🪜 Guide & Notes`** as your *Logic Blueprint*.
                 """
             )
-        with c2:
+        with gtab2:
             st.markdown(
                 """
-                **2. Middle Panel (Code Editor & Console)**
-                * Write your Python solution inside the function template (keep the exact function name).
-                * Click **▶ Run Code** to run both visible and hidden edge-case tests.
-                * Click **💡 Hint** for step-by-step clues without spoiling the full code.
+                * **Select & Code:** Choose **Mission 1**, **2**, or **3** in the left `📁 Explorer`, write your Python function in the middle editor, and click **`▶ Run Code`**.
+                * **Need a Clue?** Click **`💡 Hint`** to reveal up to 3 step-by-step clues without spoiling the full solution.
+                * **Unlock Knowledge Badges (`🔒 → 🏆`):** Passing all public and hidden tests for a mission automatically unlocks its concepts in the right-hand **🌐 Full Knowledge Map**:
+                  * **Pass Mission 1 (`gcd`):** Unlocks *Modulo (%)*, *while loop*, and *Testing Mindset*.
+                  * **Pass Mission 2 (`simplify_fraction`):** Unlocks *Function Reuse*, *Tuple Return & Integer Division*, and *Debugging Strategy*.
+                  * **Pass Mission 3 (`safe_simplify_fraction`):** Unlocks *Edge Cases (Guard Clause)*.
                 """
             )
-        with c3:
+        with gtab3:
             st.markdown(
                 """
-                **3. Right Panel (Assistant & Unlocks)**
-                * **Assistant** automatically diagnoses bugs (e.g., missing `return`, `/` vs `//`, or `b == 0`).
-                * Passing all tests for a mission unlocks concepts in **🌐 Full Knowledge Map** (🔒 → 🏆).
-                * Done? Tick the consent box and click **💾 Submit Progress** in the left sidebar!
+                * **🤖 3. GenAI:** If you used an AI tool for hints or debugging, record why you asked, your prompt, and whether you accepted its suggestion → click **`Save GenAI Stage`**.
+                * **🔎 4. Audit:** Tick the checklist to verify code accuracy, edge cases, and independent thinking → click **`Save Audit Stage`**.
+                * **🤔 5. Reflect:** Summarize what AI helped with and what required human judgement → click **`Save Reflect Stage`**.
+                * *(Reminder: Every tab has its own `Save Stage` button at the bottom—click it to mark that stage `✅` in the sidebar.)*
+                """
+            )
+        with gtab4:
+            st.markdown(
+                """
+                * **Permanent Submission (Important):** Stage `Save` buttons only hold your progress in the current browser session. To archive your completed session:
+                  1. Tick the **voluntary consent checkbox** under *Final Save & Submit* in the left sidebar.
+                  2. Click **`💾 Submit Progress`** (or **`Submit Current Draft`** at the bottom of `5. Reflect`).
+                  3. Wait for the green **`✅ Saved at ...`** confirmation toast.
+                * **Sharing a Laptop?** After the first student clicks `💾 Submit Progress`, click **`🔄 Reset Current Session`** in the left sidebar to wipe all answers, code buffers, and unlocked badges for the next student.
                 """
             )
 
@@ -1189,7 +1250,11 @@ def render_workspace() -> None:
 
     with tab_think:
         st.subheader("Think Stage")
-        st.caption("Your notes here will automatically appear inside the Code Lab IDE under 'Guide & Notes'. Do not include real names.")
+        if st.session_state.think_done:
+            st.success("✅ Status: Saved & synced to 'Code Lab IDE → Guide & Notes'. You can edit and re-save anytime.")
+        else:
+            st.info("⬜ Status: Not saved yet — fill in your logic below and click **Save Think Stage** to unlock your Logic Blueprint.")
+
         with st.form("think_form"):
             think_math = st.text_area(
                 "1) Explain the mathematical logic for simplifying a fraction",
@@ -1209,11 +1274,16 @@ def render_workspace() -> None:
             st.session_state.think_math = think_math
             st.session_state.think_python = think_python
             st.session_state.think_done = bool(think_math.strip() or think_python.strip())
-            st.toast("✅ Think stage saved!")
+            st.toast("✅ Think stage saved & synced to IDE!")
+            st.rerun()
 
     with tab_pair:
         st.subheader("Pair Stage")
-        st.caption("Your group pseudocode will also sync to the Code Lab IDE sidebar. Do not include real names.")
+        if st.session_state.pair_done:
+            st.success("✅ Status: Saved & synced to 'Code Lab IDE → Guide & Notes'.")
+        else:
+            st.info("⬜ Status: Not saved yet — fill in your pseudocode below and click **Save Pair Stage** to sync it to the IDE.")
+
         with st.form("pair_form"):
             pseudocode = st.text_area(
                 "Group pseudocode / algorithm sketch",
@@ -1222,7 +1292,7 @@ def render_workspace() -> None:
                 placeholder="1. Check if b == 0 -> return 'Undefined'\n2. Find g = gcd(a, b)\n3. Return (a // g, b // g)",
             )
             roles = st.text_area(
-                "Group roles / collaboration notes (e.g., Driver & Navigator)",
+                "Group roles / collaboration notes (e.g., Driver & Navigator — no real names)",
                 value=st.session_state.pair_roles,
                 height=95,
             )
@@ -1238,10 +1308,16 @@ def render_workspace() -> None:
             st.session_state.pair_roles = roles
             st.session_state.pair_tests = tests
             st.session_state.pair_done = bool(pseudocode.strip() or roles.strip() or tests.strip())
-            st.toast("✅ Pair stage saved!")
+            st.toast("✅ Pair stage saved & synced to IDE!")
+            st.rerun()
 
     with tab_genai:
         st.subheader("GenAI Support")
+        if st.session_state.genai_done:
+            st.success("✅ Status: GenAI stage saved.")
+        else:
+            st.info("⬜ Status: Not saved yet — record any AI support below and click **Save GenAI Stage**.")
+
         with st.form("genai_form"):
             reason = st.text_area("Why are you using AI at this point?", value=st.session_state.genai_reason, height=80)
             prompt = st.text_area("What prompt would you ask?", value=st.session_state.genai_prompt, height=120)
@@ -1256,9 +1332,15 @@ def render_workspace() -> None:
             st.session_state.genai_use = use_decision
             st.session_state.genai_done = bool(reason.strip() or prompt.strip() or output.strip() or use_decision.strip())
             st.toast("✅ GenAI stage saved!")
+            st.rerun()
 
     with tab_audit:
         st.subheader("Audit Stage")
+        if st.session_state.audit_done:
+            st.success("✅ Status: Audit stage saved.")
+        else:
+            st.info("⬜ Status: Not saved yet — complete the audit checklist below and click **Save Audit Stage**.")
+
         with st.form("audit_form"):
             c1, c2 = st.columns(2)
             with c1:
@@ -1279,9 +1361,15 @@ def render_workspace() -> None:
             st.session_state.audit_judgement = judgement
             st.session_state.audit_done = bool(accuracy or clarity or edge_cases or overreliance or judgement.strip())
             st.toast("✅ Audit stage saved!")
+            st.rerun()
 
     with tab_reflect:
         st.subheader("Reflect Stage")
+        if st.session_state.reflect_done:
+            st.success("✅ Status: Reflect stage saved.")
+        else:
+            st.info("⬜ Status: Not saved yet — write your reflection below and click **Save Reflect Stage**.")
+
         with st.form("reflect_form"):
             helpful = st.text_area("What did AI help with?", value=st.session_state.reflect_helpful, height=105)
             human = st.text_area("What still required human judgement?", value=st.session_state.reflect_human, height=105)
@@ -1294,6 +1382,7 @@ def render_workspace() -> None:
             st.session_state.reflect_next = next_time
             st.session_state.reflect_done = bool(helpful.strip() or human.strip() or next_time.strip())
             st.toast("✅ Reflect stage saved!")
+            st.rerun()
 
         st.markdown("---")
         st.subheader("Finalize & Submit")
@@ -1359,13 +1448,13 @@ def render_code_lab_ide() -> None:
                     )
 
             with l_tab2:
-                st.caption("💡 Tip: Fill in the '1. Think' and '2. Pair' tabs first to sync your Logic Blueprint here.")
+                st.caption("💡 Fill in '1. Think' & '2. Pair' and click their 'Save' buttons to unlock your Logic Blueprint below.")
                 if (
                     st.session_state.think_math.strip()
                     or st.session_state.think_python.strip()
                     or st.session_state.pair_pseudocode.strip()
                 ):
-                    st.markdown("**🧭 Your Logic Blueprint**")
+                    st.markdown("**🧭 Your Unlocked Logic Blueprint**")
                     if st.session_state.think_math.strip():
                         st.caption("**Math Logic:**")
                         st.write(st.session_state.think_math)
@@ -1376,18 +1465,18 @@ def render_code_lab_ide() -> None:
                         st.caption("**Group Pseudocode:**")
                         st.code(st.session_state.pair_pseudocode, language="text")
                 else:
-                    st.info("Complete the 'Think' and 'Pair' tabs to see your Logic Blueprint here.")
+                    st.info("🔒 Locked: Save your notes in the 'Think' or 'Pair' tab to unlock your Logic Blueprint here.")
 
                 code_edited = current_code.strip() != mission["starter_code"].strip()
                 mission_passed = mission["id"] in st.session_state.completed_missions
 
                 st.markdown("### 🪜 Checklist")
                 steps = [
-                    ("Understand the math idea", st.session_state.think_done),
-                    ("Draft pseudocode / plan", st.session_state.pair_done),
-                    ("Write & test function code", code_edited or mission_passed),
-                    ("Pass all tests", mission_passed),
-                    ("Audit & reflect", st.session_state.audit_done or st.session_state.reflect_done),
+                    ("Save math idea (1. Think)", st.session_state.think_done),
+                    ("Save pseudocode (2. Pair)", st.session_state.pair_done),
+                    ("Write & run function code", code_edited or mission_passed),
+                    ("Pass all tests (Unlocks badges)", mission_passed),
+                    ("Save Audit & Reflect + Submit", st.session_state.audit_done or st.session_state.reflect_done),
                 ]
                 for label, done in steps:
                     st.markdown(
@@ -1413,6 +1502,7 @@ def render_code_lab_ide() -> None:
                 st.session_state.last_checked_mission = mission["id"]
                 if result["ok"]:
                     unlock_for_mission(mission)
+                    st.toast("🏆 Mission passed! New Knowledge Map tutorials unlocked!")
                 st.rerun()
 
         with b2:
@@ -1496,11 +1586,12 @@ def render_code_lab_ide() -> None:
                     item = KNOWLEDGE_LIBRARY[key]
                     cls = "assistant-card-green" if unlocked else "assistant-card"
                     badge = "🏆 Mastered" if unlocked else "📖 Scaffold"
+                    pro_tip_html = f"<br><br><b>💡 Pro Tip:</b> {item['pro_tip']}" if unlocked else ""
                     st.markdown(
                         f"""
                         <div class='{cls}'>
                             <b>{item["title"]}</b> <span class='mini-tag'>{badge}</span><br>
-                            <span class='muted'>{item["body"]}</span>
+                            <span class='muted'>{item["body"]}{pro_tip_html}</span>
                         </div>
                         """,
                         unsafe_allow_html=True,
@@ -1511,12 +1602,17 @@ def render_code_lab_ide() -> None:
                 for m in mission["common_mistakes"]:
                     st.write(f"- {m}")
 
-            with st.expander("🌐 Full Knowledge Map", expanded=False):
+            with st.expander("🌐 Full Knowledge Map (Pass Missions to Unlock)", expanded=False):
+                st.caption("Complete coding missions via '▶ Run Code' to unlock tutorials and Pro Tips:")
                 unlocked_set = set(st.session_state.unlocked_knowledge)
                 for key, item in KNOWLEDGE_LIBRARY.items():
                     is_mastered = key in unlocked_set
-                    badge = "🏆" if is_mastered else "🔒"
-                    st.markdown(f"**{item['title']}** {badge}")
+                    if is_mastered:
+                        st.markdown(f"**{item['title']}** 🏆 *(Unlocked)*")
+                        st.caption(f"💡 {item['pro_tip']}")
+                    else:
+                        req_mission = get_unlock_source_label(key)
+                        st.markdown(f"**{item['title']}** 🔒 *(Pass {req_mission} to unlock)*")
 
 
 def render_teacher_live_checker() -> None:
