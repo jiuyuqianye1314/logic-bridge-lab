@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import signal
 import threading
 from typing import Any, Dict, List, Tuple
@@ -15,7 +16,7 @@ from streamlit_ace import st_ace
 
 
 # =========================================================
-# PAGE CONFIG
+# PAGE CONFIG & COMPLIANCE SETTINGS
 # =========================================================
 st.set_page_config(
     page_title="Logic Bridge Lab",
@@ -23,6 +24,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# Passcode to protect Teacher Dashboard from unauthorized student access
+TEACHER_PASSCODE = "MIT1120"
 
 # =========================================================
 # STYLE (With explicit light text colors for Dark/Light mode safety)
@@ -59,6 +63,26 @@ st.markdown(
         border: 1px solid #2C3559;
         margin-bottom: 0.85rem;
     }
+    .guide-card {
+        padding: 0.9rem 1rem;
+        border-radius: 12px;
+        background: #161D35;
+        color: #F0F2F6;
+        border: 1px solid #3B4B80;
+        border-top: 4px solid #5C7CFA;
+        margin-bottom: 0.75rem;
+        height: 100%;
+    }
+    .guide-step-badge {
+        display: inline-block;
+        padding: 0.15rem 0.55rem;
+        border-radius: 6px;
+        background: #5C7CFA;
+        color: #FFFFFF;
+        font-size: 0.78rem;
+        font-weight: 700;
+        margin-bottom: 0.45rem;
+    }
     .step-box {
         padding: 0.65rem 0.85rem;
         border-radius: 10px;
@@ -94,22 +118,6 @@ st.markdown(
         border: 1px solid #B04B4B;
         margin-bottom: 0.6rem;
         border-left: 5px solid #F44336;
-    }
-    .knowledge-locked {
-        padding: 0.8rem;
-        border-radius: 10px;
-        border: 1px solid #505050;
-        background: #171717;
-        color: #E0E0E0;
-        margin-bottom: 0.6rem;
-    }
-    .knowledge-unlocked {
-        padding: 0.8rem;
-        border-radius: 10px;
-        border: 1px solid #2D7D46;
-        background: #13291C;
-        color: #E8F5E9;
-        margin-bottom: 0.6rem;
     }
     .muted {
         color: #B9C0D0;
@@ -187,7 +195,7 @@ BLOCKED_NAMES = {
     "open", "exec", "eval", "compile", "input", "__import__",
     "globals", "locals", "vars", "dir", "getattr", "setattr",
     "delattr", "help", "quit", "exit", "os", "sys",
-    "subprocess", "pathlib", "shutil",
+    "subprocess", "pathlib", "shutil", "memoryview", "breakpoint",
 }
 
 KNOWLEDGE_LIBRARY = {
@@ -344,8 +352,22 @@ PAGES = [
 
 
 # =========================================================
-# UTILITY
+# PRIVACY & COMPLIANCE HELPERS
 # =========================================================
+def is_valid_anonymous_id(raw_id: str) -> Tuple[bool, str]:
+    """Blocks Student IDs (7-8 digits) and email addresses to enforce anonymity."""
+    cleaned = raw_id.strip()
+    if not cleaned:
+        return True, ""
+    if "@" in cleaned:
+        return False, "Privacy Guard: Do not enter an email address. Use a random code (e.g., MIT_01)."
+    if re.search(r"(^|[^0-9])\d{7,8}([^0-9]|$)", cleaned):
+        return False, "Privacy Guard: Do not enter a Student ID. Use a random code (e.g., MIT_01)."
+    if len(cleaned) > 25:
+        return False, "Keep your anonymous code under 25 characters (e.g., MIT_01)."
+    return True, ""
+
+
 def now_utc_str() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -376,6 +398,11 @@ def append_submission(record: Dict[str, Any]) -> None:
         f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
 
+def clear_all_submissions() -> None:
+    ensure_storage()
+    SUBMISSION_FILE.write_text("", encoding="utf-8")
+
+
 def get_mission_by_id(mission_id: str) -> Dict[str, Any]:
     for mission in MISSIONS:
         if mission["id"] == mission_id:
@@ -395,9 +422,9 @@ def check_result_match(result: Any, expected: Any) -> Tuple[bool, str]:
 
 
 # =========================================================
-# EXECUTION TIME LIMIT
+# EXECUTION TIME LIMIT (Inherits from BaseException so user code cannot catch it)
 # =========================================================
-class TimeoutException(Exception):
+class TimeoutException(BaseException):
     pass
 
 
@@ -430,7 +457,10 @@ def init_session() -> None:
         "page": PAGES[0],
         "group_id": "",
         "class_id": "",
-        "student_count": 3,
+        "student_count": 1,
+        "consent_agreed": False,
+        "teacher_authenticated": False,
+        "confirm_purge": False,
         "think_math": "",
         "think_python": "",
         "pair_pseudocode": "",
@@ -474,6 +504,7 @@ def init_session() -> None:
 def reset_all_draft_and_lab() -> None:
     st.session_state.group_id = ""
     st.session_state.class_id = ""
+    st.session_state.consent_agreed = False
     st.session_state.think_math = ""
     st.session_state.think_python = ""
     st.session_state.pair_pseudocode = ""
@@ -537,6 +568,10 @@ def current_draft_summary() -> Dict[str, Any]:
 
 def build_evidence_archive() -> Dict[str, Any]:
     return {
+        "compliance": {
+            "voluntary_consent_confirmed": st.session_state.consent_agreed,
+            "data_purpose": "Anonymous Product Usability & Instructional Design Feedback Only",
+        },
         "draft": {
             "group_id": st.session_state.group_id,
             "class_id": st.session_state.class_id,
@@ -588,8 +623,9 @@ def build_submission_record() -> Dict[str, Any]:
     flags = current_stage_flags()
     return {
         "timestamp": now_utc_str(),
-        "group_id": st.session_state.group_id or "",
-        "class_id": st.session_state.class_id or "",
+        "consent_confirmed": st.session_state.consent_agreed,
+        "group_id": st.session_state.group_id or "Anonymous",
+        "class_id": st.session_state.class_id or "General",
         "student_count": st.session_state.student_count,
         "think_done": flags["think_done"],
         "pair_done": flags["pair_done"],
@@ -611,6 +647,7 @@ def summary_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
         return pd.DataFrame(
             columns=[
                 "Time",
+                "Consent",
                 "Group ID",
                 "Class",
                 "Students",
@@ -632,6 +669,7 @@ def summary_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
         rows.append(
             {
                 "Time": r.get("timestamp", ""),
+                "Consent": "✅" if r.get("consent_confirmed") else "⚠️",
                 "Group ID": r.get("group_id", ""),
                 "Class": r.get("class_id", ""),
                 "Students": r.get("student_count", ""),
@@ -651,7 +689,7 @@ def summary_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
 
 
 # =========================================================
-# CODE CHECKER
+# HARDENED CODE SANDBOX CHECKER
 # =========================================================
 def validate_ast(tree: ast.AST) -> List[str]:
     errors = []
@@ -660,18 +698,46 @@ def validate_ast(tree: ast.AST) -> List[str]:
             errors.append("Import statements are not allowed in this code lab.")
         if isinstance(node, ast.Attribute):
             errors.append("Attribute access is not allowed in this code lab.")
-        if isinstance(node, (ast.Global, ast.Nonlocal, ast.ClassDef, ast.Lambda)):
+        if isinstance(
+            node,
+            (
+                ast.Global,
+                ast.Nonlocal,
+                ast.ClassDef,
+                ast.Lambda,
+                ast.Try,
+                ast.AsyncFunctionDef,
+                ast.AsyncFor,
+                ast.AsyncWith,
+                ast.Await,
+                ast.Yield,
+                ast.YieldFrom,
+            ),
+        ):
             errors.append(f"{type(node).__name__} is not allowed here.")
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id in BLOCKED_NAMES:
                 errors.append(f"The function `{node.func.id}` is not allowed.")
-        if isinstance(node, ast.Name) and node.id in BLOCKED_NAMES:
-            errors.append(f"The name `{node.id}` is not allowed.")
+        if isinstance(node, ast.Name):
+            if node.id in BLOCKED_NAMES or (node.id.startswith("__") and node.id.endswith("__")):
+                errors.append(f"The identifier `{node.id}` is not allowed.")
     return list(set(errors))
 
 
 def grade_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
     total_tests = len(mission["public_tests"]) + len(mission["hidden_tests"])
+
+    if len(code) > 2500:
+        return {
+            "ok": False,
+            "type": "safety",
+            "diag_tag": "safety",
+            "level": "error",
+            "message": "Code length exceeds the 2,500-character sandbox limit.",
+            "passed": 0,
+            "total": total_tests,
+            "details": [],
+        }
 
     try:
         tree = ast.parse(code)
@@ -908,18 +974,24 @@ def render_sidebar() -> None:
 
         st.markdown("---")
         with st.expander("Current Group Setup", expanded=True):
-            st.session_state.group_id = st.text_input(
-                "Anonymous Group / Tester ID",
+            raw_group_id = st.text_input(
+                "Anonymous Tester / Group ID",
                 value=st.session_state.group_id,
-                placeholder="e.g., Beta_01",
+                placeholder="e.g., MIT_01 (No real names)",
             )
+            id_valid, id_err = is_valid_anonymous_id(raw_group_id)
+            if not id_valid:
+                st.error(id_err)
+            else:
+                st.session_state.group_id = raw_group_id.strip()
+
             st.session_state.class_id = st.text_input(
-                "Class / Session Tag",
+                "Session / Class Tag",
                 value=st.session_state.class_id,
-                placeholder="e.g., PeerTest_A",
+                placeholder="e.g., Tryout_1120",
             )
             st.session_state.student_count = st.number_input(
-                "Number of Students in Group",
+                "Number of Students",
                 min_value=1,
                 max_value=10,
                 value=int(st.session_state.student_count),
@@ -940,11 +1012,27 @@ def render_sidebar() -> None:
         st.write(f"{'✅' if st.session_state.reflect_done else '⬜'} Reflect")
 
         st.markdown("---")
-        if st.button("💾 Submit Progress", type="primary", use_container_width=True):
+        st.markdown("### Voluntary Consent & Save")
+        st.session_state.consent_agreed = st.checkbox(
+            "I voluntarily share this anonymous session for tool usability improvement (unrelated to course grades).",
+            value=st.session_state.consent_agreed,
+            key="sidebar_consent_chk",
+        )
+
+        can_submit = st.session_state.consent_agreed and id_valid
+        if st.button(
+            "💾 Submit Progress",
+            type="primary",
+            use_container_width=True,
+            disabled=not can_submit,
+        ):
             record = build_submission_record()
             append_submission(record)
             st.session_state.last_submission_message = f"Saved at {record['timestamp']}."
             st.toast(f"✅ {st.session_state.last_submission_message}")
+
+        if not st.session_state.consent_agreed:
+            st.caption("Tick the voluntary consent box above to enable saving.")
 
         if st.button("🔄 Reset Current Session", use_container_width=True):
             reset_all_draft_and_lab()
@@ -959,10 +1047,70 @@ def render_home() -> None:
     render_header()
     st.markdown("---")
 
+    st.subheader("📖 How to Use This App (Student Quick-Start Guide)")
+    st.markdown(
+        """
+        <div class='status-good'>
+            <b>🔒 Privacy & Voluntary Participation Notice:</b><br>
+            1. Participation is <b>100% voluntary</b> and has <b>zero impact</b> on your course grades or attendance.<br>
+            2. All data is <b>strictly anonymous</b> and used solely to improve software usability and instructional design (not for formal research publication).<br>
+            3. Please enter a random code (e.g., <code>MIT_01</code>) in the left sidebar—do <b>not</b> enter your real name, Student ID, or email.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    g1, g2, g3, g4 = st.columns(4)
+    with g1:
+        st.markdown(
+            """
+            <div class='guide-card'>
+                <div class='guide-step-badge'>STEP 1 · SETUP</div><br>
+                <b>Set Anonymous ID</b><br>
+                <span class='muted'>In the left sidebar under <b>Current Group Setup</b>, enter a random code like <code>MIT_01</code>.</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with g2:
+        st.markdown(
+            """
+            <div class='guide-card'>
+                <div class='guide-step-badge'>STEP 2 · PLAN</div><br>
+                <b>Think & Pair First</b><br>
+                <span class='muted'>Jot down your math logic in <b>1. Think</b> and pseudocode in <b>2. Pair</b>. Your notes auto-sync into the IDE!</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with g3:
+        st.markdown(
+            """
+            <div class='guide-card'>
+                <div class='guide-step-badge'>STEP 3 · CODE & UNLOCK</div><br>
+                <b>Solve IDE Missions</b><br>
+                <span class='muted'>Write Python in <b>💻 Code Lab IDE</b>, click <b>▶ Run Code</b>, use <b>💡 Hint</b> if stuck, and unlock badges (🔒 → 🏆).</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with g4:
+        st.markdown(
+            """
+            <div class='guide-card'>
+                <div class='guide-step-badge'>STEP 4 · SUBMIT</div><br>
+                <b>Consent & Save</b><br>
+                <span class='muted'>Complete <b>3. GenAI</b> to <b>5. Reflect</b> (optional), tick the voluntary consent box on the left, and click <b>💾 Submit Progress</b>.</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("---")
     left, right = st.columns([2, 1])
 
     with left:
-        st.subheader("Learning Rule")
+        st.subheader("Core Learning Rule")
         st.markdown(
             f"""
             <div class='panel-box'>
@@ -977,40 +1125,59 @@ def render_home() -> None:
 
         st.markdown(
             """
-            <div class='status-good'><b>Pedagogical principle:</b> AI is used as a scaffold, not as an answer engine.</div>
-            <div class='status-warn'><b>Classroom rule:</b> Students should attempt the task before using AI.</div>
+            <div class='status-warn'><b>Classroom Principle:</b> AI is used as a thinking scaffold—attempt the logic yourself before asking AI for help.</div>
             """,
             unsafe_allow_html=True,
         )
 
-        st.subheader("IDE-style Learning Workspace")
-        st.markdown(
-            """
-            - **Left panel**: Task explorer, synced Logic Blueprint, and dynamic step-by-step guide  
-            - **Middle panel**: Syntax-highlighted Python editor + instant test runner  
-            - **Right panel**: Smart error diagnosis, live concept scaffolds, and debugging prompts  
-            - **Mastery progression**: Complete missions to unlock advanced pro-tips
-            """
-        )
-
     with right:
         summary = current_draft_summary()
-        st.subheader("Current Draft Summary")
-        st.markdown(f"**Group ID:** {summary['group_id']}")
-        st.markdown(f"**Class:** {summary['class_id']}")
-        st.markdown(f"**Student Count:** {summary['student_count']}")
+        st.subheader("Current Session Status")
+        st.markdown(f"**Anonymous ID:** {summary['group_id']}")
+        st.markdown(f"**Session Tag:** {summary['class_id']}")
         st.markdown(f"**Completed Stages:** {summary['completed_stages']}/5")
-        st.markdown(f"**Concepts Mastered:** {summary['knowledge_unlocked']}/{len(KNOWLEDGE_LIBRARY)}")
-        st.markdown(f"**Code Missions Completed:** {summary['missions_completed']}/{len(MISSIONS)}")
+        st.markdown(f"**Concepts Unlocked:** {summary['knowledge_unlocked']}/{len(KNOWLEDGE_LIBRARY)}")
+        st.markdown(f"**Missions Completed:** {summary['missions_completed']}/{len(MISSIONS)}")
 
         st.markdown("---")
-        if st.button("🚀 Open Workspace", type="primary", use_container_width=True):
+        if st.button("🚀 Start in Learning Workspace", type="primary", use_container_width=True):
             st.session_state.page = "2. Learning Workspace"
             st.rerun()
 
 
 def render_workspace() -> None:
     render_header()
+
+    with st.expander("📖 Student Quick Guide: How to Use This Workspace (Click to expand)", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.markdown(
+                """
+                **1. Left Panel (Missions & Blueprint)**
+                * Switch between **Mission 1 (`gcd`)**, **Mission 2 (`simplify_fraction`)**, and **Mission 3 (`safe_simplify_fraction`)**.
+                * Check **Public Test Cases** at the bottom.
+                * Switch to **🪜 Guide & Notes** to view your synced *Think & Pair* notes.
+                """
+            )
+        with c2:
+            st.markdown(
+                """
+                **2. Middle Panel (Code Editor & Console)**
+                * Write your Python solution inside the function template (keep the exact function name).
+                * Click **▶ Run Code** to run both visible and hidden edge-case tests.
+                * Click **💡 Hint** for step-by-step clues without spoiling the full code.
+                """
+            )
+        with c3:
+            st.markdown(
+                """
+                **3. Right Panel (Assistant & Unlocks)**
+                * **Assistant** automatically diagnoses bugs (e.g., missing `return`, `/` vs `//`, or `b == 0`).
+                * Passing all tests for a mission unlocks concepts in **🌐 Full Knowledge Map** (🔒 → 🏆).
+                * Done? Tick the consent box and click **💾 Submit Progress** in the left sidebar!
+                """
+            )
+
     st.markdown("---")
 
     tab_ide, tab_think, tab_pair, tab_genai, tab_audit, tab_reflect = st.tabs([
@@ -1022,7 +1189,7 @@ def render_workspace() -> None:
 
     with tab_think:
         st.subheader("Think Stage")
-        st.caption("Your notes here will automatically appear inside the Code Lab IDE under 'Guide & Notes'.")
+        st.caption("Your notes here will automatically appear inside the Code Lab IDE under 'Guide & Notes'. Do not include real names.")
         with st.form("think_form"):
             think_math = st.text_area(
                 "1) Explain the mathematical logic for simplifying a fraction",
@@ -1046,7 +1213,7 @@ def render_workspace() -> None:
 
     with tab_pair:
         st.subheader("Pair Stage")
-        st.caption("Your group pseudocode will also sync to the Code Lab IDE sidebar.")
+        st.caption("Your group pseudocode will also sync to the Code Lab IDE sidebar. Do not include real names.")
         with st.form("pair_form"):
             pseudocode = st.text_area(
                 "Group pseudocode / algorithm sketch",
@@ -1055,7 +1222,7 @@ def render_workspace() -> None:
                 placeholder="1. Check if b == 0 -> return 'Undefined'\n2. Find g = gcd(a, b)\n3. Return (a // g, b // g)",
             )
             roles = st.text_area(
-                "Group roles / collaboration notes",
+                "Group roles / collaboration notes (e.g., Driver & Navigator)",
                 value=st.session_state.pair_roles,
                 height=95,
             )
@@ -1130,12 +1297,19 @@ def render_workspace() -> None:
 
         st.markdown("---")
         st.subheader("Finalize & Submit")
+        id_valid, _ = is_valid_anonymous_id(st.session_state.group_id)
+        if not st.session_state.consent_agreed:
+            st.warning("Please tick the voluntary consent checkbox in the left sidebar before submitting.")
 
-        if st.button("Submit Current Draft", type="primary"):
+        if st.button(
+            "Submit Current Draft",
+            type="primary",
+            disabled=not (st.session_state.consent_agreed and id_valid),
+        ):
             record = build_submission_record()
             append_submission(record)
             st.session_state.last_submission_message = f"Submission saved at {record['timestamp']}."
-            st.toast(st.session_state.last_submission_message)
+            st.toast(f"✅ {st.session_state.last_submission_message}")
 
 
 def render_code_lab_ide() -> None:
@@ -1385,10 +1559,31 @@ def render_teacher_dashboard() -> None:
     render_header()
     st.markdown("---")
 
+    # Privacy Access Gate for Teacher Dashboard
+    if not st.session_state.teacher_authenticated:
+        st.subheader("🔒 Restricted Area: Instructor & Evaluator Access")
+        st.info("To protect participant privacy, please enter the instructor passcode to view aggregated submissions.")
+        with st.form("teacher_login_form"):
+            pwd = st.text_input("Instructor Passcode", type="password", placeholder="Enter passcode")
+            login_btn = st.form_submit_button("Unlock Dashboard", type="primary")
+        if login_btn:
+            if pwd == TEACHER_PASSCODE:
+                st.session_state.teacher_authenticated = True
+                st.rerun()
+            else:
+                st.error("Incorrect passcode.")
+        return
+
+    top_col1, top_col2 = st.columns([4, 1])
+    with top_col2:
+        if st.button("🔒 Lock Dashboard", use_container_width=True):
+            st.session_state.teacher_authenticated = False
+            st.rerun()
+
     records = load_submissions()
     summary_df = summary_dataframe(records)
 
-    tab1, tab2, tab3 = st.tabs(["📊 Submissions & Charts", "💻 Live Checker", "⬇️ Evidence Export"])
+    tab1, tab2, tab3 = st.tabs(["📊 Submissions & Charts", "💻 Live Checker", "⬇️ Evidence Export & Data Cleanup"])
 
     with tab1:
         st.subheader("Submissions Dashboard")
@@ -1425,8 +1620,22 @@ def render_teacher_dashboard() -> None:
         )
 
         st.markdown("---")
-        st.write("- Use coded group IDs rather than personal identifiers.")
-        st.write("- Local file storage is suitable for prototype/demo use.")
+        st.subheader("Data Retention & Compliance Controls")
+        st.write("- All records use coded anonymous IDs rather than personal identifiers.")
+        st.write("- Data is collected strictly for anonymous usability and instructional design evaluation.")
+
+        st.session_state.confirm_purge = st.checkbox(
+            "I have backed up the data and want to permanently delete all stored records.",
+            value=st.session_state.confirm_purge,
+        )
+        if st.button(
+            "🗑️ Delete All Stored Records",
+            disabled=not st.session_state.confirm_purge,
+        ):
+            clear_all_submissions()
+            st.session_state.confirm_purge = False
+            st.success("All stored submission records have been permanently deleted.")
+            st.rerun()
 
 
 # =========================================================
