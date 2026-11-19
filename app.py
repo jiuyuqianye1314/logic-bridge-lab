@@ -928,8 +928,15 @@ def ace_editor(label: str, value: str, key: str, height: int = 310) -> str:
 
 
 def render_feedback_panel(feedback: Dict[str, Any] | None, mission: Dict[str, Any]) -> None:
+    shown = st.session_state.hint_levels.get(mission["id"], 0)
+    if shown > 0:
+        st.markdown("**💡 Guided Hints**")
+        for i in range(min(shown, len(mission["hints"]))):
+            st.info(f"**Hint {i + 1}:** {mission['hints'][i]}")
+
     if not feedback:
-        st.info("Run your code to see test results and diagnostic feedback.")
+        if shown == 0:
+            st.info("Run your code to see test results and diagnostic feedback.")
         return
 
     level = feedback.get("level", "partial")
@@ -965,12 +972,6 @@ def render_feedback_panel(feedback: Dict[str, Any] | None, mission: Dict[str, An
 
     if public_rows:
         st.dataframe(pd.DataFrame(public_rows), use_container_width=True, hide_index=True)
-
-    shown = st.session_state.hint_levels.get(mission["id"], 0)
-    if shown > 0:
-        st.markdown("**Guided Hints**")
-        for i in range(min(shown, len(mission["hints"]))):
-            st.write(f"- **Hint {i + 1}:** {mission['hints'][i]}")
 
 
 def render_sidebar() -> None:
@@ -1508,7 +1509,12 @@ def render_code_lab_ide() -> None:
         with b2:
             if st.button("💡 Hint", use_container_width=True, key=f"hint_{mission['id']}"):
                 current = st.session_state.hint_levels.get(mission["id"], 0)
-                st.session_state.hint_levels[mission["id"]] = min(current + 1, len(mission["hints"]))
+                max_hints = len(mission["hints"])
+                if current < max_hints:
+                    st.session_state.hint_levels[mission["id"]] = current + 1
+                    st.toast(f"💡 Unlocked Hint {current + 1}/{max_hints} below!")
+                else:
+                    st.toast(f"💡 All {max_hints} hints are already shown below.")
                 st.rerun()
 
         with b3:
