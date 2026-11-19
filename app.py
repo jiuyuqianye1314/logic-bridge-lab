@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import random
 import re
 import signal
 import threading
@@ -984,10 +985,14 @@ def render_sidebar() -> None:
 
         st.markdown("---")
         with st.expander("1️⃣ Step 1: Anonymous Setup", expanded=True):
+            if st.button("🎲 Generate Random ID", use_container_width=True):
+                st.session_state.group_id = f"MIT_{random.randint(100, 999)}"
+                st.rerun()
+
             raw_group_id = st.text_input(
                 "Anonymous Tester / Group ID",
                 value=st.session_state.group_id,
-                placeholder="e.g., MIT_01 (Press Enter)",
+                placeholder="Type a code (e.g., MIT_01) & press Enter",
             )
             id_valid, id_err = is_valid_anonymous_id(raw_group_id)
             if not id_valid:
@@ -1078,7 +1083,7 @@ def render_home() -> None:
             <div class='guide-card'>
                 <div class='guide-step-badge'>STEP 1 · SETUP</div><br>
                 <b>Set Anonymous ID</b><br>
-                <span class='muted'>In the left sidebar under <b>Anonymous Setup</b>, enter a random code like <code>MIT_01</code> and press Enter.</span>
+                <span class='muted'>In the left sidebar under <b>Anonymous Setup</b>, click <b>Generate Random ID</b> or type a code like <code>MIT_01</code>.</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1204,7 +1209,7 @@ def render_workspace() -> None:
         with gtab1:
             st.markdown(
                 """
-                * **Step A — Set Anonymous ID (Left Sidebar):** Enter a random code like `MIT_01` under *Anonymous Setup* and press Enter (do **not** use your real name or Student ID).
+                * **Step A — Set Anonymous ID (Left Sidebar):** Click **🎲 Generate Random ID** or enter a random code like `MIT_01` under *Anonymous Setup* and press Enter (do **not** use your real name or Student ID).
                 * **Step B — Save `📝 1. Think` & `🤝 2. Pair`:** Write your math explanation and pseudocode, then **click the blue `Save Think Stage` / `Save Pair Stage` button** at the bottom of each form.
                 * **Step C — Check Your Unlocked Blueprint:** Once saved, the sidebar turns `✅`, and your notes automatically appear inside **💻 Code Lab IDE → Left Panel → `🪜 Guide & Notes`** as your *Logic Blueprint*.
                 """
