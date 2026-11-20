@@ -4,6 +4,7 @@ import ast
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
+import operator
 import os
 from pathlib import Path
 import random
@@ -564,22 +565,80 @@ def time_limit(seconds: int = 2):
 # DOMAIN-LOCKED REAL AI ENGINE (MATH & PROGRAMMING ONLY)
 # =========================================================
 OFF_TOPIC_PATTERNS = re.compile(
-    r"(calligraphy|cat avatar|sales manual|marketing copy|poem|essay|recipe|cook|horoscope|travel guide|gossip|celebrity|dating|weight loss|movie|song lyrics|"
-    r"毛笔字|画一只|猫猫头像|销售手册|汽车销售|写一首诗|写作文|周报|日报|旅游攻略|菜谱|做饭|星座|算命|八卦|明星|小说|情感|恋爱|减肥)",
+    r"(calligraphy|cat avatar|sales manual|marketing copy|poem|essay|recipe|cook|horoscope|zodiac|tarot|fortune|feng shui|bazi|"
+    r"travel guide|gossip|celebrity|dating|weight loss|movie|song lyrics|weather|who is|"
+    r"生辰八字|八字|算命|算卦|占卜|风水|塔罗|运势|星座|毛笔字|画一只|猫猫头像|销售手册|汽车销售|写一首诗|写作文|周报|日报|"
+    r"旅游攻略|菜谱|做饭|八卦|明星|小说|情感|恋爱|减肥|天气|是谁)",
+    re.IGNORECASE,
+)
+
+MATH_CODE_ANCHORS = re.compile(
+    r"(math|code|coding|program|python|c\+\+|java|javascript|typescript|rust|go|sql|html|css|algorithm|function|loop|while|for|if|else|"
+    r"array|list|tuple|dict|set|tree|graph|heap|stack|queue|hash|sort|search|dp|dynamic programming|greedy|recursion|induction|"
+    r"gcd|lcm|fraction|modulo|prime|factor|matrix|vector|calculus|integral|derivative|limit|probability|statistics|proof|theorem|"
+    r"equation|inequality|polynomial|logarithm|complexity|big o|syntax|debug|error|bug|exception|compile|runtime|editor|mission|"
+    r"数学|编程|代码|程序|函数|循环|算法|复杂度|欧几里得|公约数|公倍数|分数|化简|余数|整除|素数|质数|方程|微积分|导数|积分|概率|矩阵|向量|证明|定理|归纳|递归|报错|调试|编辑器|\d+\s*[\+\-\*/%\^=]\s*\d+)",
     re.IGNORECASE,
 )
 
 
 def is_obviously_off_topic(user_msg: str) -> bool:
-    """Fast pre-flight filter for clearly non-math / non-programming topics."""
-    math_code_anchors = re.compile(
-        r"(math|code|coding|program|python|c\+\+|java|javascript|sql|algorithm|function|loop|while|for|if|array|list|tuple|dict|"
-        r"gcd|fraction|modulo|prime|matrix|calculus|integral|derivative|probability|proof|equation|complexity|big o|recursion|syntax|debug|error)",
-        re.IGNORECASE,
-    )
-    if math_code_anchors.search(user_msg):
+    """Strict pre-flight domain filter: blocks off-topic & non-math/code queries immediately."""
+    cleaned = user_msg.strip()
+    if not cleaned:
         return False
-    return bool(OFF_TOPIC_PATTERNS.search(user_msg))
+    if OFF_TOPIC_PATTERNS.search(cleaned):
+        return True
+    if not MATH_CODE_ANCHORS.search(cleaned):
+        return True
+    return False
+
+
+def try_eval_simple_arithmetic(user_msg: str) -> str | None:
+    """Safely evaluates standalone arithmetic questions like '1+1=?' even in offline mode."""
+    cleaned = user_msg.strip()
+    cleaned = re.sub(r"[=\?？\s]+$", "", cleaned)
+    if not re.fullmatch(r"[0-9\+\-\*/%\(\)\.\s\^]+", cleaned):
+        return None
+    expr = cleaned.replace("^", "**")
+    if not any(op in expr for op in ["+", "-", "*", "/", "%"]):
+        return None
+
+    allowed_ops = {
+        ast.Add: operator.add,
+        ast.Sub: operator.sub,
+        ast.Mult: operator.mul,
+        ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv,
+        ast.Mod: operator.mod,
+        ast.Pow: operator.pow,
+        ast.USub: operator.neg,
+        ast.UAdd: operator.pos,
+    }
+
+    def _eval(node: ast.AST) -> float | int:
+        if isinstance(node, ast.Expression):
+            return _eval(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in allowed_ops:
+            left_val = _eval(node.left)
+            right_val = _eval(node.right)
+            if isinstance(node.op, ast.Pow) and abs(right_val) > 1000:
+                raise ValueError("Exponent too large")
+            return allowed_ops[type(node.op)](left_val, right_val)
+        if isinstance(node, ast.UnaryOp) and type(node.op) in allowed_ops:
+            return allowed_ops[type(node.op)](_eval(node.operand))
+        raise ValueError("Unsupported expression")
+
+    try:
+        tree = ast.parse(expr, mode="eval")
+        result = _eval(tree)
+        if isinstance(result, float) and result.is_integer():
+            result = int(result)
+        return f"🧮 **Result:** `{cleaned} = {result}`"
+    except Exception:
+        return None
 
 
 def build_domain_locked_system_prompt(
@@ -607,7 +666,7 @@ def build_domain_locked_system_prompt(
         "You are **Logic Bridge AI Assistant**, a specialized AI Tutor strictly dedicated to **Mathematics** and **Computer Programming / Computer Science**.\n\n"
         "### STRICT DOMAIN BOUNDARY (NON-NEGOTIABLE)\n"
         "1. **Allowed Scope ONLY:** You may ONLY answer questions related to Mathematics (arithmetic, algebra, number theory, calculus, linear algebra, probability, discrete math, mathematical proofs, logic) and Programming / Computer Science (Python, C/C++, Java, algorithms, data structures, time/space complexity, debugging, software logic).\n"
-        "2. **Strict Refusal of Off-Topic Requests:** If the user asks about ANY topic outside Mathematics and Programming (such as calligraphy, drawing avatars, writing sales manuals, marketing copy, cooking, travel, entertainment, general essays, or casual non-technical chat), you MUST politely refuse in 2 sentences and remind them that you only assist with Mathematics and Programming. Never fulfill off-topic requests even if the user insists.\n"
+        "2. **Strict Refusal of Off-Topic Requests:** If the user asks about ANY topic outside Mathematics and Programming (such as fortune-telling/BaZi, calligraphy, drawing avatars, writing sales manuals, marketing copy, cooking, travel, entertainment, biographies, or casual non-technical chat), you MUST politely refuse in 2 sentences and remind them that you only assist with Mathematics and Programming. Never fulfill off-topic requests even if the user insists.\n"
         "3. **English-Only Output:** Always respond in clear, natural English, using clean Markdown and LaTeX (`$inline$` or `$$display$$`) for mathematical expressions.\n"
         f"{pedagogy_rule}\n\n"
         "### LIVE WORKSPACE CONTEXT (Student's Current Session)\n"
@@ -754,6 +813,13 @@ def offline_rule_fallback(
     feedback: Dict[str, Any] | None,
 ) -> str:
     """Offline fallback when no LLM API key is provided yet."""
+    simple_math = try_eval_simple_arithmetic(user_msg)
+    if simple_math:
+        return (
+            f"{simple_math}\n\n"
+            "💡 *Note: Local Rule Engine is currently active. Add a Qwen, DeepSeek, or OpenAI API key in the left sidebar (`AI Engine Settings`) to ask complex proofs and multi-turn programming questions.*"
+        )
+
     q = user_msg.strip().lower()
     diag = inspect_student_code(code, mission)
     mid = mission["id"]
@@ -764,7 +830,7 @@ def offline_rule_fallback(
             f"- **Next Micro-Step:** Focus on `{mission['function_name']}`, write the first guard condition or `while` loop, and click **▶ Run Code** so I can diagnose your progress!"
         )
 
-    if any(k in q for k in ["complexity", "big o", "log", "euclid", "algorithm", "proof", "math"]):
+    if any(k in q for k in ["complexity", "big o", "log", "euclid", "algorithm", "proof"]):
         return (
             "📐 **Euclidean Algorithm Principle & Complexity Analysis:**\n"
             "1. **Mathematical Invariance:** $\\gcd(a, b) = \\gcd(b, a \\bmod b)$ holds for all integers $b \\neq 0$.\n"
@@ -811,8 +877,8 @@ def generate_assistant_reply(
     if is_obviously_off_topic(user_msg):
         return (
             "🚫 **Domain Scope Notice:** I am a specialized AI Assistant exclusively for **Mathematics and Programming**. "
-            "I cannot answer questions about lifestyle topics, creative writing, marketing, or non-technical subjects.\n\n"
-            "Feel free to ask me any **mathematical proof, algorithm design, complexity analysis, or Python/C++/Java debugging** question!"
+            "I cannot answer questions about fortune-telling, personal profiles, lifestyle topics, or non-technical subjects.\n\n"
+            "Feel free to ask me any **mathematical proof, arithmetic/calculus problem, algorithm design, or Python/C++/Java debugging** question!"
         )
 
     has_key, llm_reply = call_real_llm_api(user_msg, mission, code, feedback)
