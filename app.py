@@ -4,6 +4,7 @@ import ast
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import random
 import re
@@ -12,6 +13,7 @@ import threading
 from typing import Any, Dict, List, Tuple
 
 import pandas as pd
+import requests
 import streamlit as st
 from streamlit_ace import st_ace
 
@@ -30,7 +32,7 @@ st.set_page_config(
 TEACHER_PASSCODE = "MIT1120"
 
 # =========================================================
-# STYLE (With explicit light text colors & enlarged Save buttons)
+# STYLE (Includes AI Assistant Card UI & Enlarged Save Buttons)
 # =========================================================
 st.markdown(
     """
@@ -158,9 +160,42 @@ st.markdown(
         color: #E8F5E9;
         margin-bottom: 0.55rem;
     }
+    .ai-header-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 0.32rem 0.85rem;
+        border-radius: 999px;
+        background: linear-gradient(135deg, #253369 0%, #3B4CCA 100%);
+        color: #FFFFFF;
+        font-weight: 700;
+        font-size: 0.92rem;
+        border: 1px solid #5C7CFA;
+        box-shadow: 0 2px 8px rgba(92, 124, 250, 0.25);
+    }
+    .ai-greeting-box {
+        text-align: center;
+        padding: 0.75rem 0.5rem 0.35rem 0.5rem;
+    }
+    .ai-greeting-title {
+        font-size: 1.28rem;
+        font-weight: 800;
+        color: #F8FAFC;
+        margin-bottom: 0.2rem;
+    }
+    .ai-greeting-sub {
+        font-size: 0.82rem;
+        color: #94A3B8;
+    }
+    .ai-discover-header {
+        font-size: 0.88rem;
+        font-weight: 700;
+        color: #A5B4FC;
+        margin-bottom: 0.45rem;
+    }
     div[data-testid="stFormSubmitButton"] > button {
-        min-height: 2.9rem !important;
-        font-size: 1.05rem !important;
+        min-height: 2.85rem !important;
+        font-size: 1.02rem !important;
         font-weight: 700 !important;
         border-radius: 10px !important;
     }
@@ -170,10 +205,29 @@ st.markdown(
 )
 
 # =========================================================
-# STORAGE
+# STORAGE & DEFAULT AI PROVIDER PRESETS
 # =========================================================
 DATA_DIR = Path("data")
 SUBMISSION_FILE = DATA_DIR / "submissions.jsonl"
+
+AI_PROVIDER_PRESETS = {
+    "通义千问 Qwen (DashScope)": {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "qwen-plus",
+    },
+    "DeepSeek": {
+        "base_url": "https://api.deepseek.com",
+        "model": "deepseek-chat",
+    },
+    "OpenAI": {
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4o-mini",
+    },
+    "自定义 OpenAI 兼容接口": {
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "qwen-plus",
+    },
+}
 
 # =========================================================
 # PROJECT CONSTANTS
@@ -368,6 +422,39 @@ PAGES = [
 
 
 # =========================================================
+# SECRETS & API CONFIG LOADER
+# =========================================================
+def get_configured_ai_credentials() -> Tuple[str, str, str]:
+    """Reads API key/url/model from session_state, st.secrets, or env vars safely."""
+    secret_key = ""
+    secret_url = ""
+    secret_model = ""
+    try:
+        secret_key = st.secrets.get("AI_API_KEY", "")
+        secret_url = st.secrets.get("AI_BASE_URL", "")
+        secret_model = st.secrets.get("AI_MODEL", "")
+    except Exception:
+        pass
+
+    api_key = (
+        st.session_state.get("user_ai_api_key", "").strip()
+        or secret_key
+        or os.getenv("AI_API_KEY", "")
+    ).strip()
+    base_url = (
+        st.session_state.get("user_ai_base_url", "").strip()
+        or secret_url
+        or os.getenv("AI_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    ).strip().rstrip("/")
+    model = (
+        st.session_state.get("user_ai_model", "").strip()
+        or secret_model
+        or os.getenv("AI_MODEL", "qwen-plus")
+    ).strip()
+    return api_key, base_url, model
+
+
+# =========================================================
 # PRIVACY & COMPLIANCE HELPERS
 # =========================================================
 def is_valid_anonymous_id(raw_id: str) -> Tuple[bool, str]:
@@ -427,7 +514,6 @@ def get_mission_by_id(mission_id: str) -> Dict[str, Any]:
 
 
 def get_unlock_source_label(concept_key: str) -> str:
-    """Returns which mission(s) unlock a given knowledge concept."""
     sources = []
     for idx, m in enumerate(MISSIONS, start=1):
         if concept_key in m["unlocks"]:
@@ -475,26 +561,130 @@ def time_limit(seconds: int = 2):
 
 
 # =========================================================
-# CONTEXT-AWARE SOCRATIC AI TUTOR ENGINE
+# DOMAIN-LOCKED REAL AI ENGINE (MATH & PROGRAMMING ONLY)
 # =========================================================
+OFF_TOPIC_PATTERNS = re.compile(
+    r"(毛笔字|画一只|猫猫头像|销售手册|汽车销售|写一首诗|写作文|周报|日报|旅游攻略|菜谱|做饭|星座|算命|八卦|明星|小说|情感|恋爱|减肥|"
+    r"calligraphy|cat avatar|sales manual|poem|recipe|cook|horoscope|travel guide|gossip|celebrity|dating|weight loss)",
+    re.IGNORECASE,
+)
+
+
+def is_obviously_off_topic(user_msg: str) -> bool:
+    """Fast pre-flight filter for clearly non-math / non-programming topics."""
+    math_code_anchors = re.compile(
+        r"(math|code|python|c\+\+|java|javascript|sql|algorithm|function|loop|while|for|if|array|list|tuple|dict|"
+        r"gcd|fraction|modulo|prime|matrix|calculus|integral|derivative|probability|proof|equation|complexity|big o|"
+        r"数学|编程|代码|函数|循环|算法|复杂度|欧几里得|余数|整除|方程|微积分|概率|矩阵|证明|报错|调试|bug)",
+        re.IGNORECASE,
+    )
+    if math_code_anchors.search(user_msg):
+        return False
+    return bool(OFF_TOPIC_PATTERNS.search(user_msg))
+
+
+def build_domain_locked_system_prompt(
+    mission: Dict[str, Any],
+    code: str,
+    feedback: Dict[str, Any] | None,
+    socratic_guard: bool,
+) -> str:
+    """Constructs a strict Math & Programming system prompt injected with live workspace context."""
+    think_notes = (st.session_state.think_math or st.session_state.think_python).strip() or "(Not written yet)"
+    pair_notes = st.session_state.pair_pseudocode.strip() or "(Not written yet)"
+    fb_summary = (
+        f"Passed {feedback.get('passed')}/{feedback.get('total')} tests. Message: {feedback.get('message')}"
+        if feedback
+        else "Not run yet."
+    )
+
+    pedagogy_rule = (
+        "4. **Socratic Pedagogy Rule (Active):** When the student asks about the current coding mission, DO NOT dump the complete copy-paste solution code at once. Instead, diagnose their specific bug/line, explain the underlying mathematical or algorithmic principle, and give the next concrete micro-step or guiding question. However, for general math/CS theory questions (e.g., proofs, Big-O complexity, calculus, data structures, syntax comparisons), provide thorough, clear, well-structured explanations with LaTeX ($...$) and short illustrative snippets."
+        if socratic_guard
+        else "4. **Deep Explanation Mode (Active):** Provide thorough, step-by-step mathematical proofs, algorithmic complexity analysis, and clear code explanations with LaTeX ($...$) and examples."
+    )
+
+    indented_code = "\n".join("    " + line for line in code.splitlines())
+
+    return f"""You are **Logic Bridge AI助理**, a specialized AI Tutor strictly dedicated to **Mathematics** and **Computer Programming / Computer Science**.
+
+### STRICT DOMAIN BOUNDARY (NON-NEGOTIABLE)
+1. **Allowed Scope ONLY:** You may ONLY answer questions related to Mathematics (arithmetic, algebra, number theory, calculus, linear algebra, probability, discrete math, mathematical proofs, logic) and Programming / Computer Science (Python, C/C++, Java, algorithms, data structures, time/space complexity, debugging, software logic).
+2. **Strict Refusal of Off-Topic Requests:** If the user asks about ANY topic outside Mathematics and Programming (such as calligraphy, drawing avatars, writing sales manuals, marketing copy, cooking, travel, entertainment, general essays, or casual non-technical chat), you MUST politely refuse in 2 sentences and remind them that you only assist with Mathematics and Programming. Never fulfill off-topic requests even if the user insists.
+3. **Language Matching:** Reply in the same language the user uses (Chinese if they ask in Chinese, English if they ask in English), using clean Markdown and LaTeX (`$inline$` or `$$display$$`) for math expressions.
+{pedagogy_rule}
+
+### LIVE WORKSPACE CONTEXT (Student's Current Session)
+- **Current Mission:** {mission['title']} — {mission['goal']}
+- **Student's Saved `1. Think` Math Plan:** {think_notes}
+- **Student's Saved `2. Pair` Pseudocode:** {pair_notes}
+- **Student's Current Editor Code (Python):**
+{indented_code}
+- **Latest Test Console Status:** {fb_summary}
+"""
+
+
+def call_real_llm_api(
+    user_msg: str,
+    mission: Dict[str, Any],
+    code: str,
+    feedback: Dict[str, Any] | None,
+) -> Tuple[bool, str]:
+    """Calls any OpenAI-compatible Chat Completions endpoint (Qwen/DashScope, DeepSeek, OpenAI)."""
+    api_key, base_url, model = get_configured_ai_credentials()
+    if not api_key:
+        return False, ""
+
+    socratic_guard = st.session_state.get("socratic_guard_mode", True)
+    system_prompt = build_domain_locked_system_prompt(mission, code, feedback, socratic_guard)
+
+    history = st.session_state.chat_histories.get(mission["id"], [])
+    messages = [{"role": "system", "content": system_prompt}]
+    for item in history[-8:]:
+        if item.get("role") in ("user", "assistant"):
+            messages.append({"role": item["role"], "content": item["content"]})
+    messages.append({"role": "user", "content": user_msg})
+
+    endpoint = f"{base_url}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.4,
+        "max_tokens": 1200,
+    }
+
+    try:
+        resp = requests.post(endpoint, headers=headers, json=payload, timeout=30)
+        if resp.status_code != 200:
+            err_detail = resp.text[:220]
+            return True, f"⚠️ **AI 接口返回错误 ({resp.status_code})：** 请检查侧边栏的 API Key、Base URL 或模型名称是否正确。\n\n`{err_detail}`"
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"].strip()
+        return True, content
+    except requests.Timeout:
+        return True, "⏳ **请求超时：** 模型响应时间较长，请稍后重试一次。"
+    except Exception as e:
+        return True, f"⚠️ **网络连接异常：** `{e}`"
+
+
 def inspect_student_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
-    """Performs lightweight AST static inspection to give pedagogy-aware hints without spoiling answers."""
+    """Lightweight AST static inspection used for offline fallback & instant diagnostics."""
     info: Dict[str, Any] = {
         "is_unstarted": code.strip() == mission["starter_code"].strip(),
         "syntax_error": None,
         "has_import": False,
         "uses_print_no_return": False,
-        "has_while": False,
-        "has_modulo": False,
         "sequential_overwrite": False,
         "returns_b": False,
-        "calls_gcd": False,
+        "has_modulo": False,
         "uses_true_div": False,
         "returns_list": False,
         "checks_b_zero": False,
-        "has_undefined_str": False,
     }
-
     try:
         tree = ast.parse(code)
     except SyntaxError as e:
@@ -510,14 +700,12 @@ def inspect_student_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
 
     if target_fn is None:
         return info
-
     if len(target_fn.body) == 1 and isinstance(target_fn.body[0], ast.Pass):
         info["is_unstarted"] = True
         return info
 
     has_return = False
     has_print = False
-
     for node in ast.walk(target_fn):
         if isinstance(node, ast.Return) and node.value is not None:
             has_return = True
@@ -525,13 +713,9 @@ def inspect_student_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
                 info["returns_b"] = True
             if isinstance(node.value, ast.List):
                 info["returns_list"] = True
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id == "print":
-                has_print = True
-            if node.func.id == "gcd":
-                info["calls_gcd"] = True
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "print":
+            has_print = True
         if isinstance(node, ast.While):
-            info["has_while"] = True
             for i in range(len(node.body) - 1):
                 s1, s2 = node.body[i], node.body[i + 1]
                 if (
@@ -556,236 +740,84 @@ def inspect_student_code(code: str, mission: Dict[str, Any]) -> Dict[str, Any]:
             for comp in node.comparators:
                 if isinstance(comp, ast.Constant) and comp.value == 0:
                     info["checks_b_zero"] = True
-        if isinstance(node, ast.Constant) and node.value == "Undefined":
-            info["has_undefined_str"] = True
 
     if has_print and not has_return:
         info["uses_print_no_return"] = True
-
     return info
 
 
-def generate_socratic_reply(
+def offline_rule_fallback(
     user_msg: str,
     mission: Dict[str, Any],
     code: str,
     feedback: Dict[str, Any] | None,
 ) -> str:
-    """Generates a Socratic, curriculum-aligned response grounded in the student's live code & Think notes."""
+    """Offline fallback when no LLM API key is provided yet."""
     q = user_msg.strip().lower()
     diag = inspect_student_code(code, mission)
     mid = mission["id"]
 
-    # 1. Flexible Anti-Cheating / Full-Solution Guardrail
-    cheat_pattern = re.search(
-        r"(write|give|show|tell|solve|do).*(whole|entire|full|complete|all|code|solution|answer|it for me)"
-        r"|(直接给|给我代码|完整代码|全部代码|直接写|帮我写|告诉我答案)",
-        q,
-    )
-    if cheat_pattern:
-        if mid == "gcd":
-            nudge = "Start by writing `while b != 0:`—what two values need to swap/update inside each iteration?"
-        elif mid == "simplify_fraction":
-            nudge = "Start by calling `g = gcd(a, b)` on line 1 of `simplify_fraction`—how do you reduce `a` and `b` using `g`?"
-        else:
-            nudge = "Start with an `if b == 0:` guard at the top of `safe_simplify_fraction`—what string should it return?"
+    if re.search(r"(write|give|show|solve).*(whole|entire|full|complete|code|solution|answer)|(直接给|完整代码|直接写|帮我写)", q):
         return (
-            "🛡️ **Pedagogy Guardrail:** I can't write the complete solution for you, because building the logic yourself is the core goal of this lab!\n\n"
-            f"- **Your Next Micro-Step:** {nudge}\n"
-            "- Write just 1–2 lines in the editor, click **▶ Run Code**, and ask me to check your progress."
+            "🛡️ **防代写护栏：** 我不会直接输出完整答案代码，以免剥夺你独立推导逻辑的机会。\n\n"
+            f"- **下一步微提示：** 聚焦 `{mission['function_name']}`，先写出第一行条件判断或 `while` 循环，点击 **▶ Run Code** 后我再帮你逐行诊断！"
         )
 
-    # 2. Math / Algorithm Principle Questions (e.g., "How does Euclidean algorithm work?")
-    if any(k in q for k in ["euclid", "algorithm", "math", "principle", "how does", "logic", "work", "欧几里得", "辗转", "原理", "思路", "怎么算"]):
-        if mid == "gcd":
-            return (
-                "📐 **Euclidean Algorithm Intuition:**\n"
-                "The greatest common divisor of `(a, b)` doesn't change if you replace the larger number with the remainder `a % b`.\n\n"
-                "- **Example (`a=8, b=12`):** `(8, 12)` → `(12, 8)` → `(8, 4)` → `(4, 0)`.\n"
-                "- **Stopping rule:** Once `b` reaches `0`, `a` (`4`) is your GCD! How would you write that loop condition in Python?"
-            )
-        if mid == "simplify_fraction":
-            return (
-                "📐 **Fraction Simplification Logic:**\n"
-                "To reduce a fraction `a / b` to lowest terms, divide both `a` and `b` by their greatest common divisor `g = gcd(a, b)`.\n\n"
-                "- **Example (`8 / 12`):** `gcd(8, 12) = 4`, so `(8 // 4, 12 // 4)` gives `(2, 3)`."
-            )
+    if any(k in q for k in ["复杂度", "complexity", "big o", "log", "欧几里得", "euclid", "原理"]):
         return (
-            "📐 **Safe Simplification Logic:**\n"
-            "Division by zero is undefined in mathematics, so `safe_simplify_fraction(a, b)` must intercept `b == 0` **before** computing `gcd` or dividing."
+            "📐 **欧几里得算法原理与时间复杂度分析：**\n"
+            "1. **数学不变性**：$\\gcd(a, b) = \\gcd(b, a \\bmod b)$。\n"
+            "2. **时间复杂度 $O(\\log(\\min(a, b)))$**：每经过至多两步取余迭代，较大的数至少减半（与斐波那契数列相邻项为最坏情况相对应），因此即使输入上亿级整数也只需几十次循环。\n\n"
+            "💡 *提示：在左侧边栏填入通义千问或 DeepSeek API Key 后，我可以回答任意复杂度的数学证明与多语言编程问题！*"
         )
 
-    # 3. Specific Python Syntax / Operator Questions (%, //, while, tuple, return)
-    if any(k in q for k in ["modulo", "%", "remainder", "取余", "余数"]):
+    if any(k in q for k in ["归纳", "递归", "循环", "recursion", "while", "loop"]):
         return (
-            "🔢 **Modulo (`%`) Operator:** `a % b` returns the remainder after dividing `a` by `b`.\n"
-            "- For example, `12 % 8` evaluates to `4`, and `8 % 4` evaluates to `0`.\n"
-            "- In `gcd(a, b)`, `a % b` gives the exact remainder needed for the next step."
-        )
-    if any(k in q for k in ["//", "division", "divide", "float", "整除", "除法"]):
-        return (
-            "🔢 **Integer Division (`//`) vs. True Division (`/`):**\n"
-            "- `8 / 4` produces a float (`2.0`), whereas `8 // 4` produces an integer (`2`).\n"
-            "- Since fractions expect integer pairs like `(2, 3)`, always use `//`."
-        )
-    if any(k in q for k in ["while", "loop", "infinite", "stop", "循环", "死循环"]):
-        return (
-            "🔁 **How the `while` Loop Terminates:**\n"
-            "- `while b != 0:` keeps running as long as `b` is not zero.\n"
-            "- Inside the loop, updating `a, b = b, a % b` shrinks `b` on every step until `b` inevitably hits `0`."
-        )
-    if any(k in q for k in ["tuple", "list", "return", "print", "元组", "返回"]):
-        return (
-            "📦 **Returning Tuples vs. Printing:**\n"
-            "- Use `return (num, den)` with parentheses `(...)` so the test runner receives a `tuple`.\n"
-            "- Avoid `print(...)` inside the function—`print` outputs text to the console, while the function itself returns `None`."
+            "🔁 **数学归纳 / 递归 到 循环的转化：**\n"
+            "- **递推关系**：$f(a, b) = f(b, a \\bmod b)$，终止边界为 $b = 0$ 时返回 $a$。\n"
+            "- **尾递归转迭代**：因为递归调用位于最后一步，只需用 `while b != 0:` 配合同步赋值 `a, b = b, a % b` 即可消除栈空间开销（空间复杂度降至 $O(1)$）。"
         )
 
-    # 4. Bridge from saved 1. Think / 2. Pair notes
-    if any(k in q for k in ["think", "pair", "blueprint", "bridge", "plan", "笔记"]):
-        think_text = (st.session_state.think_math or st.session_state.think_python).strip()
-        pair_text = st.session_state.pair_pseudocode.strip()
-        if think_text or pair_text:
-            snippet = (think_text or pair_text)[:140]
-            return (
-                f"🌉 **Bridging Your Saved Blueprint:** You wrote: *\"{snippet}...\"*\n\n"
-                "Let's map that directly to Python:\n"
-                + (
-                    "1. In **Mission 1 (`gcd`)**, your repeated remainder step becomes `while b != 0:`.\n"
-                    "2. Inside the loop, update `a` and `b` simultaneously on one line (`a, b = ...`)."
-                    if mid == "gcd"
-                    else "1. Reuse `g = gcd(a, b)` so you don't rewrite the loop.\n"
-                    "2. Use integer division `//` when building the `(num, den)` tuple."
-                )
-            )
-        return (
-            "📝 **Think-First Tip:** You haven't saved notes in **`1. Think`** yet! "
-            "Write 1 sentence there about how you'd solve this by hand, click **Save Think Stage**, "
-            "and I'll help translate your words into Python."
-        )
-
-    # 5. Edge-case / Hidden-test coaching
-    if any(k in q for k in ["edge", "hidden", "boundary", "zero", "0", "边界", "隐藏"]):
-        if mid == "gcd":
-            return (
-                "🧪 **Edge-Case Check for `gcd(a, b)`:**\n"
-                "- What happens if `a < b`, such as `gcd(8, 12)`?\n"
-                "- What if `b == 0`, such as `gcd(9, 0)`? Does your loop skip cleanly and return `9`?"
-            )
-        if mid == "simplify_fraction":
-            return (
-                "🧪 **Edge-Case Check for `simplify_fraction(a, b)`:**\n"
-                "- What if `a` and `b` are coprime, like `(7, 13)`?\n"
-                "- What if `a > b`, like `(10, 5)`? Ensure it returns `(2, 1)` as a **tuple**, not `2`."
-            )
-        return (
-            "🧪 **Edge-Case Check for `safe_simplify_fraction(a, b)`:**\n"
-            "- Trace `(5, 0)` line by line: does `if b == 0:` run **before** calling `gcd(a, b)`?\n"
-            "- Check the exact spelling and capitalization of `'Undefined'`."
-        )
-
-    # 6. Live AST Code Inspection & Test Failure Diagnosis
     if diag["syntax_error"]:
-        return (
-            f"🔎 **Syntax Clue:** Python paused at **{diag['syntax_error']}**.\n\n"
-            "Check that line (and the line above it) for a missing colon `:`, unmatched `()`, or inconsistent indentation."
-        )
-
-    if diag["has_import"]:
-        return (
-            "🔒 **Sandbox Rule:** `import` statements are disabled here so you can practice writing the core logic directly. "
-            "You only need `%`, `//`, `==`, `!=`, and `while`/`if`."
-        )
+        return f"🔎 **语法诊断：** Python 在 **{diag['syntax_error']}** 处检测到语法错误，请检查冒号 `:`、括号匹配或 4 空格缩进。"
 
     if diag["uses_print_no_return"]:
-        return (
-            "💡 **Spotted a Classic Bug:** You used `print(...)`, which displays output on screen, "
-            "but automated tests inspect the **returned** value (currently `None`). Replace `print(...)` with `return ...`!"
-        )
+        return "💡 **经典错误提示：** 你在函数中使用了 `print(...)`，但评测系统检查的是 `return` 返回值（当前返回了 `None`）。请改用 `return`。"
 
     if mid == "gcd" and not diag["is_unstarted"]:
         if diag["sequential_overwrite"]:
-            return (
-                "⚠️ **Subtle Variable Bug Detected:** `a = b` runs *before* `b = a % b`, overwriting `a` first!\n\n"
-                "**Socratic Question:** How does Python update two variables simultaneously on a single line (`a, b = ...`)?"
-            )
+            return "⚠️ **变量覆盖警告：** 先执行 `a = b` 会把原来的 `a` 覆盖掉，导致下一行 `b = a % b` 变成 `b % b == 0`。试试 Python 的同步赋值 `a, b = b, a % b`！"
         if diag["returns_b"]:
-            return (
-                "🤔 Look closely at your `return` statement: when `while b != 0:` finishes, `b` is always `0`. "
-                "Which variable holds the last non-zero remainder?"
-            )
-        if not diag["has_modulo"]:
-            return (
-                "📐 **Math-to-Code Clue:** The Euclidean Algorithm uses the **remainder** of `a` divided by `b`. "
-                "Which Python operator computes remainder?"
-            )
+            return "🤔 当 `while b != 0:` 结束时，`b` 的值一定为 `0`。真正保存最大公约数的是哪一个变量？"
 
-    if mid in ("simplify_fraction", "safe_simplify_fraction") and not diag["is_unstarted"]:
-        if mid == "safe_simplify_fraction" and not diag["checks_b_zero"]:
-            return (
-                "🛡️ **Guard Clause Missing:** What happens if someone calls `safe_simplify_fraction(5, 0)` right now?\n\n"
-                "Add an `if b == 0:` check at the **very top** of the function."
-            )
-        if diag["uses_true_div"]:
-            return (
-                "🔢 **Type Mismatch Clue:** Single `/` produces floats (like `2.0`). "
-                "Use integer floor division `//` instead."
-            )
-        if diag["returns_list"]:
-            return (
-                "📦 **Container Clue:** Square brackets `[...]` return a `list`, "
-                "but the specification expects a `tuple` using parentheses `(...)`."
-            )
+    if feedback and not feedback.get("ok"):
+        return f"🔍 **测试反馈诊断：** {feedback.get('message')}\n\n建议代入失败用例手动追踪每一步变量变化。"
 
-    # 7. Starter-template guidance (only when asking to diagnose/start, or tailored to mission)
-    if diag["is_unstarted"]:
-        if any(k in q for k in ["diagnose", "start", "begin", "help", "first", "怎么开始", "诊断", "提示"]):
-            if mid == "gcd":
-                reply = (
-                    "👋 Your editor still has the starter template for `gcd`.\n\n"
-                    "**First micro-step:** Replace `pass` with a `while b != 0:` loop. What should happen to `a` and `b` inside each step?"
-                )
-            elif mid == "simplify_fraction":
-                reply = (
-                    "👋 Your editor still has the starter template for `simplify_fraction`.\n\n"
-                    "**First micro-step:** Replace `pass` with `g = gcd(a, b)` to reuse your helper function. How do you return the reduced pair?"
-                )
-            else:
-                reply = (
-                    "👋 Your editor still has the starter template for `safe_simplify_fraction`.\n\n"
-                    "**First micro-step:** Replace `pass` with `if b == 0:` to handle the zero-denominator edge case first."
-                )
-        else:
-            reply = (
-                f"💬 I see your editor for `{mission['function_name']}` still has `pass`. "
-                "To give you targeted feedback, try asking about:\n"
-                "- **Math logic** (e.g., *\"How does the Euclidean algorithm work?\"*)\n"
-                "- **Python syntax** (e.g., *\"How do `%` or `while` loops work?\"*)\n"
-                "- **Code check** after replacing `pass` and clicking **▶ Run Code**!"
-            )
-    elif feedback and feedback.get("ok"):
-        reply = (
-            f"🏆 **`{mission['function_name']}` passed all public & hidden tests!**\n\n"
-            "Head over to **`5. Reflect`** to note what required your own reasoning vs. AI support."
-        )
-    elif feedback and not feedback.get("ok"):
-        reply = (
-            f"🔍 **Latest Test Feedback:** {feedback.get('message')}\n\n"
-            "Trace your function by hand with the failing input `(a, b)`—what value does each variable hold right before `return`?"
-        )
-    else:
-        reply = (
-            f"👍 You've edited `{mission['function_name']}`! "
-            "Click **▶ Run Code** so I can inspect the test results, or ask me about a specific operator (`%`, `//`, `while`)."
+    return (
+        f"🤖 **当前处于本地规则引擎模式**（未检测到 API Key）。\n\n"
+        f"- 针对当前任务 `{mission['function_name']}`：建议先写出核心逻辑并点击 **▶ Run Code** 进行测试。\n"
+        "- 若希望体验**完整真实 AI 对话**（自由解答任意高数、线性代数、算法设计、多语言报错分析），请在左侧边栏 **`🤖 AI 引擎配置`** 中填入通义千问或 DeepSeek 的 API Key！"
+    )
+
+
+def generate_assistant_reply(
+    user_msg: str,
+    mission: Dict[str, Any],
+    code: str,
+    feedback: Dict[str, Any] | None,
+) -> str:
+    """Unified entry point: Domain-Lock Guardrail -> Real LLM API -> Offline Fallback."""
+    if is_obviously_off_topic(user_msg):
+        return (
+            "🚫 **学科范围提示：** 我是专注于**数学与编程**的 AI 助理，无法回答生活闲聊、营销文案、绘画或其他非理工科问题。\n\n"
+            "你可以向我提问任何**数学推导、算法原理、Python/C++/Java 编程或代码排错**问题！"
         )
 
-    # Anti-repetition safeguard: never return the exact same message twice in a row
-    history = st.session_state.chat_histories.get(mid, [])
-    last_assistant = next((m["content"] for m in reversed(history) if m["role"] == "assistant"), "")
-    if reply.strip() == last_assistant.strip():
-        reply += "\n\n*(Tip: Try editing a line in the editor and clicking **▶ Run Code**, or ask a specific question about `%`, `while`, or edge cases!)*"
+    has_key, llm_reply = call_real_llm_api(user_msg, mission, code, feedback)
+    if has_key:
+        return llm_reply
 
-    return reply
+    return offline_rule_fallback(user_msg, mission, code, feedback)
 
 
 # =========================================================
@@ -800,6 +832,11 @@ def init_session() -> None:
         "consent_agreed": False,
         "teacher_authenticated": False,
         "confirm_purge": False,
+        "ai_provider_choice": "通义千问 Qwen (DashScope)",
+        "user_ai_api_key": "",
+        "user_ai_base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "user_ai_model": "qwen-plus",
+        "socratic_guard_mode": True,
         "think_math": "",
         "think_python": "",
         "pair_pseudocode": "",
@@ -1255,7 +1292,7 @@ def render_header() -> None:
         """
         <div class='device-banner'>
             💻 <b>Device Tip:</b> Best experienced on a <b>Laptop / Desktop</b> for side-by-side coding & AI dialogue.
-            📱 <b>On Mobile?</b> Start with <b>1. Think</b> to outline your math logic, or scroll down inside the IDE to view the Console & Socratic AI Tutor.
+            📱 <b>On Mobile?</b> Start with <b>1. Think</b> to outline your math logic, or scroll down inside the IDE to view the Console & Math/Code AI Assistant.
         </div>
         """,
         unsafe_allow_html=True,
@@ -1364,6 +1401,43 @@ def render_sidebar() -> None:
                 step=1,
             )
 
+        with st.expander("🤖 AI 引擎配置 (数学与编程专属)", expanded=False):
+            api_key_now, _, model_now = get_configured_ai_credentials()
+            if api_key_now:
+                st.success(f"🟢 真实大模型已连接 (`{model_now}`)")
+            else:
+                st.warning("🟡 未填入 API Key（当前使用本地规则引擎）")
+
+            provider = st.selectbox(
+                "选择模型服务商",
+                options=list(AI_PROVIDER_PRESETS.keys()),
+                index=list(AI_PROVIDER_PRESETS.keys()).index(st.session_state.ai_provider_choice),
+            )
+            if provider != st.session_state.ai_provider_choice:
+                st.session_state.ai_provider_choice = provider
+                st.session_state.user_ai_base_url = AI_PROVIDER_PRESETS[provider]["base_url"]
+                st.session_state.user_ai_model = AI_PROVIDER_PRESETS[provider]["model"]
+                st.rerun()
+
+            st.session_state.user_ai_api_key = st.text_input(
+                "API Key (仅保存在当前浏览器会话)",
+                value=st.session_state.user_ai_api_key,
+                type="password",
+                placeholder="sk-...",
+            )
+            st.session_state.user_ai_base_url = st.text_input(
+                "Base URL",
+                value=st.session_state.user_ai_base_url,
+            )
+            st.session_state.user_ai_model = st.text_input(
+                "Model 名称",
+                value=st.session_state.user_ai_model,
+            )
+            st.session_state.socratic_guard_mode = st.checkbox(
+                "开启苏格拉底防代写模式（任务代码不直接吐出完整答案）",
+                value=st.session_state.socratic_guard_mode,
+            )
+
         st.markdown("---")
         st.markdown("### 📊 Progress & Unlocks")
         flags = current_stage_flags()
@@ -1376,7 +1450,6 @@ def render_sidebar() -> None:
         st.write(f"{'✅' if st.session_state.genai_done else '⬜'} GenAI Support")
         st.write(f"{'✅' if st.session_state.audit_done else '⬜'} Audit")
         st.write(f"{'✅' if st.session_state.reflect_done else '⬜'} Reflect")
-        st.caption("Click the large 'Save ... Stage' button inside each tab to check off items above.")
 
         st.markdown("---")
         st.markdown("### 💾 Final Save & Submit")
@@ -1454,9 +1527,9 @@ def render_home() -> None:
         st.markdown(
             """
             <div class='guide-card'>
-                <div class='guide-step-badge'>STEP 3 · CODE & CHAT</div><br>
-                <b>Solve & Ask Socratic AI</b><br>
-                <span class='muted'>Write Python in <b>💻 Code Lab IDE</b>, chat with the <b>Socratic AI Tutor</b> on the right, and pass tests to unlock badges (🔒 → 🏆)!</span>
+                <div class='guide-step-badge'>STEP 3 · CODE & AI</div><br>
+                <b>Solve & Ask Math/Code AI</b><br>
+                <span class='muted'>Write Python in <b>💻 Code Lab IDE</b>, ask any math/coding question to the <b>AI助理</b> on the right, and pass tests to unlock badges (🔒 → 🏆)!</span>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1473,7 +1546,7 @@ def render_home() -> None:
             unsafe_allow_html=True,
         )
 
-    st.subheader("🔓 How Saving Answers & Socratic AI Dialogue Work")
+    st.subheader("🔓 How Saving Answers & Math/Code AI Work")
     u1, u2 = st.columns(2)
     with u1:
         st.markdown(
@@ -1482,7 +1555,7 @@ def render_home() -> None:
                 <b>1. How Saving Text Answers Unlocks Your Logic Blueprint</b><br><br>
                 <ul>
                     <li>Inside <b>📝 1. Think</b> and <b>🤝 2. Pair</b>, click the large blue <b>💾 Save Think Stage</b> / <b>💾 Save Pair Stage</b> button at the bottom of each form.</li>
-                    <li>Once saved, the left sidebar updates from <code>⬜</code> to <code>✅</code>, and your notes sync to <b>💻 Code Lab IDE → 🪜 Guide & Notes</b> and the <b>Socratic AI Tutor</b>.</li>
+                    <li>Once saved, the left sidebar updates from <code>⬜</code> to <code>✅</code>, and your notes sync to <b>💻 Code Lab IDE → 🪜 Guide & Notes</b> and the <b>AI助理</b>.</li>
                 </ul>
             </div>
             """,
@@ -1492,10 +1565,10 @@ def render_home() -> None:
         st.markdown(
             """
             <div class='panel-box'>
-                <b>2. How the Socratic AI Tutor Differs from Generic Chatbots</b><br><br>
+                <b>2. Domain-Locked Math & Programming AI助理</b><br><br>
                 <ul>
-                    <li>Instead of dumping copy-paste answers, our <b>Socratic AI Tutor</b> inspects your live Python AST, test failures, and saved <i>Think</i> blueprint.</li>
-                    <li>Ask it to <i>diagnose a bug</i>, <i>bridge your Think notes</i>, or <i>check edge cases</i>—and pass missions via <b>▶ Run Code</b> to unlock Knowledge Map badges (🔒 → 🏆)!</li>
+                    <li>Powered by real LLM reasoning with strict domain boundaries—answers complex <b>Mathematics & Programming</b> questions while blocking off-topic requests.</li>
+                    <li>Automatically reads your current editor code and test results for personalized debugging and LaTeX math explanations.</li>
                 </ul>
             </div>
             """,
@@ -1519,13 +1592,6 @@ def render_home() -> None:
             unsafe_allow_html=True,
         )
 
-        st.markdown(
-            """
-            <div class='status-warn'><b>Classroom Principle:</b> AI is used as a Socratic thinking scaffold—it inspects your code and asks guiding questions rather than writing the answer for you.</div>
-            """,
-            unsafe_allow_html=True,
-        )
-
     with right:
         summary = current_draft_summary()
         st.subheader("Current Session Status")
@@ -1544,10 +1610,10 @@ def render_home() -> None:
 def render_workspace() -> None:
     render_header()
 
-    with st.expander("📖 Student Guide: How to Save Answers, Chat with Socratic AI & Unlock Tutorials (Click to expand)", expanded=False):
+    with st.expander("📖 Student Guide: How to Save Answers, Use Math/Code AI & Unlock Tutorials (Click to expand)", expanded=False):
         gtab1, gtab2, gtab3, gtab4 = st.tabs([
             "1️⃣ Setup & Think/Pair Sync",
-            "2️⃣ Code Lab & Socratic AI Chat",
+            "2️⃣ Code Lab & Math/Code AI",
             "3️⃣ GenAI, Audit & Reflect",
             "4️⃣ Final Submit & Shared Laptop Reset",
         ])
@@ -1564,7 +1630,7 @@ def render_workspace() -> None:
             st.markdown(
                 """
                 * **Select & Code:** Choose **Mission 1**, **2**, or **3** in the left `📁 Explorer`, write your Python function in the middle editor, and click **`▶ Run Code`**.
-                * **Dialogue with Socratic AI Tutor (Right Panel):** Use the quick buttons (**Diagnose Code**, **Bridge Think**, **Check Edge Cases**) or type any question in the chat box. It reads your actual code and guides you without spoiling the full solution!
+                * **Ask AI助理 (Right Panel):** Tap any prompt under **✨ 发现提示词** or type any complex **math or programming** question in **`有问题尽管问我~`**.
                 * **Unlock Knowledge Badges (`🔒 → 🏆`):** Passing all public and hidden tests unlocks tutorials in **🌐 Full Knowledge Map**.
                 """
             )
@@ -1596,7 +1662,7 @@ def render_workspace() -> None:
     with tab_think:
         st.subheader("Think Stage")
         if st.session_state.think_done:
-            st.success("✅ Status: Saved & synced to 'Code Lab IDE → Guide & Notes' and the Socratic AI Tutor.")
+            st.success("✅ Status: Saved & synced to 'Code Lab IDE → Guide & Notes' and AI助理.")
         else:
             st.info("⬜ Status: Not saved yet — fill in your logic below and click the large **💾 Save Think Stage** button to unlock your Logic Blueprint.")
 
@@ -1665,7 +1731,7 @@ def render_workspace() -> None:
 
         with st.form("genai_form"):
             reason = st.text_area("Why are you using AI at this point?", value=st.session_state.genai_reason, height=80)
-            prompt = st.text_area("What prompt/question did you ask the Socratic AI Tutor?", value=st.session_state.genai_prompt, height=120)
+            prompt = st.text_area("What prompt/question did you ask the AI助理?", value=st.session_state.genai_prompt, height=120)
             output = st.text_area("What did the AI suggest? (summary only)", value=st.session_state.genai_output, height=110)
             use_decision = st.text_area("Did you use the suggestion? Why or why not?", value=st.session_state.genai_use, height=110)
             submitted = st.form_submit_button("💾 Save GenAI Stage", type="primary", use_container_width=True)
@@ -1752,10 +1818,10 @@ def render_code_lab_ide() -> None:
     feedback = st.session_state.mission_feedback.get(mission["id"])
     current_code = st.session_state.code_buffers[mission["id"]]
 
-    left, middle, right = st.columns([1.15, 1.75, 1.15], gap="medium")
+    left, middle, right = st.columns([1.1, 1.7, 1.25], gap="medium")
 
     with left:
-        with st.container(height=620):
+        with st.container(height=650):
             l_tab1, l_tab2 = st.tabs(["📁 Explorer", "🪜 Guide & Notes"])
 
             with l_tab1:
@@ -1835,7 +1901,7 @@ def render_code_lab_ide() -> None:
             "Python Workspace",
             current_code,
             key=f"editor_{mission['id']}",
-            height=320,
+            height=330,
         )
         st.session_state.code_buffers[mission["id"]] = code
 
@@ -1900,96 +1966,79 @@ def render_code_lab_ide() -> None:
         render_feedback_panel(feedback, mission)
 
     with right:
-        with st.container(height=620):
-            hdr_c1, hdr_c2 = st.columns([3, 1])
-            with hdr_c1:
-                st.markdown("### 🤖 Socratic AI Tutor")
-            with hdr_c2:
-                if st.button("🧹", help="Clear chat history", key=f"clear_chat_{mission['id']}"):
+        with st.container(height=650):
+            top_l, top_r = st.columns([4, 1])
+            with top_l:
+                st.markdown("<div class='ai-header-pill'>✨ AI助理 · 数学与编程专属</div>", unsafe_allow_html=True)
+            with top_r:
+                if st.button("🧹", help="清空对话记录", key=f"clear_chat_{mission['id']}"):
                     st.session_state.chat_histories[mission["id"]] = []
                     st.rerun()
 
-            if feedback:
-                ftype = feedback.get("type")
-                diag_tag = feedback.get("diag_tag", "")
-                if ftype == "syntax":
-                    st.error("**Syntax Issue:** Check colons `:`, indentation, or parentheses.")
-                elif ftype == "missing_function":
-                    st.error(f"**Function Mismatch:** Use exact name `{mission['function_name']}`.")
-                elif ftype == "timeout":
-                    st.error("**Infinite Loop:** Condition never became False.")
-                elif ftype == "runtime":
-                    st.error(f"**Runtime Error:** {feedback.get('message')}")
-                elif feedback.get("ok"):
-                    st.success("**All Tests Passed!**")
-                else:
-                    if diag_tag == "returned_none":
-                        st.warning("**Diagnosis:** Returned `None`. Forgot `return`?")
-                    elif diag_tag == "returned_list_instead_of_tuple":
-                        st.warning("**Diagnosis:** Returned `list` instead of `tuple`.")
-                    elif diag_tag == "float_division_used":
-                        st.warning("**Diagnosis:** Contains floats. Use `//` instead of `/`.")
-                    elif diag_tag == "zero_division":
-                        st.warning("**Diagnosis:** Division by zero! Check `b == 0` first.")
-                    else:
-                        st.warning(f"**Logic Mismatch:** {feedback.get('message')}")
-
-            a_tab_chat, a_tab_map = st.tabs(["💬 Socratic Chat", "📚 Scaffolds & Map"])
+            a_tab_chat, a_tab_map = st.tabs(["💬 AI 对话助理", "📚 知识图谱"])
 
             with a_tab_chat:
-                st.caption("Context-aware tutor: inspects your code & Think plan without spoiling answers.")
-
-                q1, q2 = st.columns(2)
-                with q1:
-                    if st.button("🔍 Diagnose Code", use_container_width=True, key=f"qp_diag_{mission['id']}"):
-                        prompt_text = "Diagnose my current code"
-                        reply = generate_socratic_reply(prompt_text, mission, code, feedback)
-                        st.session_state.chat_histories[mission["id"]].append({"role": "user", "content": prompt_text})
-                        st.session_state.chat_histories[mission["id"]].append({"role": "assistant", "content": reply})
-                        st.rerun()
-                with q2:
-                    if st.button("🌉 Bridge Think", use_container_width=True, key=f"qp_bridge_{mission['id']}"):
-                        prompt_text = "Bridge my Think blueprint to code"
-                        reply = generate_socratic_reply(prompt_text, mission, code, feedback)
-                        st.session_state.chat_histories[mission["id"]].append({"role": "user", "content": prompt_text})
-                        st.session_state.chat_histories[mission["id"]].append({"role": "assistant", "content": reply})
-                        st.rerun()
-
-                if st.button("🧪 Check Edge Cases", use_container_width=True, key=f"qp_edge_{mission['id']}"):
-                    prompt_text = "Check edge cases for this mission"
-                    reply = generate_socratic_reply(prompt_text, mission, code, feedback)
-                    st.session_state.chat_histories[mission["id"]].append({"role": "user", "content": prompt_text})
-                    st.session_state.chat_histories[mission["id"]].append({"role": "assistant", "content": reply})
-                    st.rerun()
-
                 history = st.session_state.chat_histories[mission["id"]]
-                if not history:
-                    welcome_msg = (
-                        f"Hi! I'm your **Socratic Tutor** for `{mission['function_name']}`. "
-                        "Tap a button above or ask me about your logic, syntax, or edge cases!"
-                    )
-                    history.append({"role": "assistant", "content": welcome_msg})
 
-                # Safe bordered container bubbles (prevents nested st.chat_message React crashes)
+                if not history:
+                    st.markdown(
+                        """
+                        <div class='ai-greeting-box'>
+                            <div class='ai-greeting-title'>👋 Hi, 你好呀</div>
+                            <div class='ai-greeting-sub'>专注数学推导与编程答疑 · 实时感知你的代码状态</div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                    with st.container(border=True):
+                        st.markdown("<div class='ai-discover-header'>✨ 发现提示词 &gt;</div>", unsafe_allow_html=True)
+                        starter_prompts = [
+                            "➕ 帮我诊断当前编辑器里的 Python 代码逻辑",
+                            "➕ 欧几里得算法的时间复杂度为什么是 O(log min(a,b))？",
+                            "➕ 如何把数学归纳法或递归思想转化为循环代码？",
+                        ]
+                        for idx, sp in enumerate(starter_prompts):
+                            if st.button(sp, use_container_width=True, key=f"discover_{mission['id']}_{idx}"):
+                                clean_prompt = sp.replace("➕ ", "")
+                                st.session_state.chat_histories[mission["id"]].append(
+                                    {"role": "user", "content": clean_prompt}
+                                )
+                                with st.spinner("思考中..."):
+                                    reply = generate_assistant_reply(clean_prompt, mission, code, feedback)
+                                st.session_state.chat_histories[mission["id"]].append(
+                                    {"role": "assistant", "content": reply}
+                                )
+                                st.rerun()
+
                 for msg in history:
                     with st.container(border=True):
-                        prefix = "🧑‍💻 **You:**" if msg["role"] == "user" else "🤖 **Socratic Tutor:**"
-                        st.markdown(f"{prefix}\n\n{msg['content']}")
+                        if msg["role"] == "user":
+                            st.markdown(f"🧑‍💻 **你：**\n\n{msg['content']}")
+                        else:
+                            st.markdown(f"🤖 **AI助理：**\n\n{msg['content']}")
 
                 with st.form(key=f"chat_form_{mission['id']}", clear_on_submit=True):
                     user_q = st.text_input(
-                        "Ask the Socratic Tutor...",
-                        placeholder="e.g., Why is my loop not stopping?",
+                        "输入你的数学或编程问题",
+                        placeholder="有问题尽管问我~（仅限数学与编程）",
                         label_visibility="collapsed",
                     )
-                    send_btn = st.form_submit_button("💬 Send Question", use_container_width=True)
+                    send_btn = st.form_submit_button("➤ 发送问题", type="primary", use_container_width=True)
 
                 if send_btn and user_q.strip():
                     clean_q = user_q.strip()
-                    reply = generate_socratic_reply(clean_q, mission, code, feedback)
                     st.session_state.chat_histories[mission["id"]].append({"role": "user", "content": clean_q})
+                    with st.spinner("AI助理正在推导中..."):
+                        reply = generate_assistant_reply(clean_q, mission, code, feedback)
                     st.session_state.chat_histories[mission["id"]].append({"role": "assistant", "content": reply})
                     st.rerun()
+
+                api_key_active, _, model_active = get_configured_ai_credentials()
+                if api_key_active:
+                    st.caption(f"⚡ Powered by `{model_active}` · 仅限数学与编程领域")
+                else:
+                    st.caption("💡 提示：在左侧边栏填入通义千问 / DeepSeek API Key 可解锁无限多轮自由推理")
 
             with a_tab_map:
                 with st.expander("📚 Concept Scaffolds (Unlocks)", expanded=True):
@@ -2067,7 +2116,6 @@ def render_teacher_dashboard() -> None:
     render_header()
     st.markdown("---")
 
-    # Privacy Access Gate for Teacher Dashboard
     if not st.session_state.teacher_authenticated:
         st.subheader("🔒 Restricted Area: Instructor & Evaluator Access")
         st.info("To protect participant privacy, please enter the instructor passcode to view aggregated submissions.")
