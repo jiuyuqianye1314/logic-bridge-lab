@@ -573,23 +573,27 @@ OFF_TOPIC_PATTERNS = re.compile(
 )
 
 MATH_CODE_ANCHORS = re.compile(
-    r"(math|code|coding|program|python|c\+\+|java|javascript|typescript|rust|go|sql|html|css|algorithm|function|loop|while|for|if|else|"
-    r"array|list|tuple|dict|set|tree|graph|heap|stack|queue|hash|sort|search|dp|dynamic programming|greedy|recursion|induction|"
-    r"gcd|lcm|fraction|modulo|prime|factor|matrix|vector|calculus|integral|derivative|limit|probability|statistics|proof|theorem|"
+    r"(math|code|coding|program|python|c\+\+|java|javascript|typescript|rust|go|sql|html|css|algorithm|function|loop|while|for|if|else|elif|"
+    r"print|return|def|pass|class|import|lambda|yield|break|continue|input|len|range|type|int|str|float|bool|variable|string|integer|boolean|"
+    r"parameter|argument|scope|operator|array|list|tuple|dict|set|tree|graph|heap|stack|queue|hash|sort|search|dp|dynamic programming|greedy|recursion|induction|"
+    r"gcd|lcm|fraction|modulo|remainder|quotient|divisor|prime|factor|matrix|vector|calculus|integral|derivative|limit|probability|statistics|proof|theorem|"
     r"equation|inequality|polynomial|logarithm|complexity|big o|syntax|debug|error|bug|exception|compile|runtime|editor|mission|"
+    r"[a-zA-Z_]\w*\s*\(\s*\)|"
     r"数学|编程|代码|程序|函数|循环|算法|复杂度|欧几里得|公约数|公倍数|分数|化简|余数|整除|素数|质数|方程|微积分|导数|积分|概率|矩阵|向量|证明|定理|归纳|递归|报错|调试|编辑器|\d+\s*[\+\-\*/%\^=]\s*\d+)",
     re.IGNORECASE,
 )
 
 
-def is_obviously_off_topic(user_msg: str) -> bool:
-    """Strict pre-flight domain filter: blocks off-topic & non-math/code queries immediately."""
+def is_obviously_off_topic(user_msg: str, has_live_llm: bool = False) -> bool:
+    """Domain pre-filter: blocks off-topic queries while allowing all valid math/coding questions."""
     cleaned = user_msg.strip()
     if not cleaned:
         return False
     if OFF_TOPIC_PATTERNS.search(cleaned):
         return True
-    if not MATH_CODE_ANCHORS.search(cleaned):
+    # When live LLM is connected, let the strict System Prompt adjudicate nuanced queries;
+    # in offline mode, verify at least one math/code anchor or code syntax token is present.
+    if not has_live_llm and not MATH_CODE_ANCHORS.search(cleaned):
         return True
     return False
 
@@ -657,7 +661,7 @@ def build_domain_locked_system_prompt(
     )
 
     pedagogy_rule = (
-        "4. **Socratic Pedagogy Rule (Active):** When the student asks about the current coding mission, DO NOT dump the complete copy-paste solution code at once. Instead, diagnose their specific bug or line, explain the underlying mathematical or algorithmic principle, and give the next concrete micro-step or guiding question. However, for general mathematics or computer science theory questions (e.g., proofs, Big-O complexity, calculus, data structures, syntax comparisons), provide thorough, clear, well-structured explanations with LaTeX ($...$) and short illustrative snippets."
+        "4. **Socratic Pedagogy Rule (Active):** When the student asks about the current coding mission, DO NOT dump the complete copy-paste solution code at once. Instead, diagnose their specific bug or line, explain the underlying mathematical or algorithmic principle, and give the next concrete micro-step or guiding question. However, for general mathematics or computer science theory questions (e.g., proofs, Big-O complexity, calculus, data structures, syntax comparisons like `print()` vs `return`), provide thorough, clear, well-structured explanations with LaTeX ($...$) and short illustrative snippets."
         if socratic_guard
         else "4. **Deep Explanation Mode (Active):** Provide thorough, step-by-step mathematical proofs, algorithmic complexity analysis, and clear code explanations with LaTeX ($...$) and illustrative examples."
     )
@@ -830,6 +834,40 @@ def offline_rule_fallback(
             f"- **Next Micro-Step:** Focus on `{mission['function_name']}`, write the first guard condition or `while` loop, and click **▶ Run Code** so I can diagnose your progress!"
         )
 
+    if "print" in q:
+        return (
+            "📘 **What `print()` Means in Python:**\n"
+            "- **`print(value)`** displays text or values on the screen (console) for humans to read, and always evaluates to `None`.\n"
+            "- **Important Lab Tip (`print` vs. `return`):** Automated test cases in this lab check the value **returned** by your function (`return result`), not what is printed on screen. If you only use `print()`, your function returns `None` and fails the tests!"
+        )
+
+    if "return" in q:
+        return (
+            "📘 **What `return` Means in Python:**\n"
+            "- **`return value`** exits the current function immediately and sends `value` back to whoever called the function (including our automated test grader).\n"
+            "- Without a `return` statement, a Python function automatically returns `None`."
+        )
+
+    if re.search(r"\bdef\b", q):
+        return (
+            "📘 **What `def` Means in Python:**\n"
+            "- **`def function_name(params):`** defines a reusable function. Everything indented underneath belongs to that function's body."
+        )
+
+    if any(k in q for k in ["modulo", "%", "remainder"]):
+        return (
+            "📘 **Modulo Operator (`%`) in Python:**\n"
+            "- **`a % b`** returns the remainder when `a` is divided by `b` (for example, `12 % 8 == 4`).\n"
+            "- In the Euclidean Algorithm, `a, b = b, a % b` shrinks the pair while preserving $\\gcd(a, b)$."
+        )
+
+    if "//" in q or "integer division" in q or "floor division" in q:
+        return (
+            "📘 **Integer Division (`//`) vs. True Division (`/`):**\n"
+            "- **`8 // 4`** returns the integer `2` (`int`), whereas **`8 / 4`** returns `2.0` (`float`).\n"
+            "- Use `//` when simplifying fractions so `(a // g, b // g)` returns a tuple of integers."
+        )
+
     if any(k in q for k in ["complexity", "big o", "log", "euclid", "algorithm", "proof"]):
         return (
             "📐 **Euclidean Algorithm Principle & Complexity Analysis:**\n"
@@ -874,15 +912,18 @@ def generate_assistant_reply(
     feedback: Dict[str, Any] | None,
 ) -> str:
     """Unified entry point: Domain-Lock Guardrail -> Real LLM API -> Offline Fallback."""
-    if is_obviously_off_topic(user_msg):
+    api_key, _, _ = get_configured_ai_credentials()
+    has_live_llm = bool(api_key)
+
+    if is_obviously_off_topic(user_msg, has_live_llm=has_live_llm):
         return (
             "🚫 **Domain Scope Notice:** I am a specialized AI Assistant exclusively for **Mathematics and Programming**. "
             "I cannot answer questions about fortune-telling, personal profiles, lifestyle topics, or non-technical subjects.\n\n"
             "Feel free to ask me any **mathematical proof, arithmetic/calculus problem, algorithm design, or Python/C++/Java debugging** question!"
         )
 
-    has_key, llm_reply = call_real_llm_api(user_msg, mission, code, feedback)
-    if has_key:
+    if has_live_llm:
+        _, llm_reply = call_real_llm_api(user_msg, mission, code, feedback)
         return llm_reply
 
     return offline_rule_fallback(user_msg, mission, code, feedback)
