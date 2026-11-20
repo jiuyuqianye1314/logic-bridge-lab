@@ -576,20 +576,73 @@ def generate_socratic_reply(
     diag = inspect_student_code(code, mission)
     mid = mission["id"]
 
-    cheat_triggers = [
-        "give me the code", "full code", "complete code", "solve it for me",
-        "just give me the answer", "what is the answer", "write the code",
-        "直接给", "给我代码", "答案", "帮我写",
-    ]
-    if any(t in q for t in cheat_triggers):
+    # 1. Flexible Anti-Cheating / Full-Solution Guardrail
+    cheat_pattern = re.search(
+        r"(write|give|show|tell|solve|do).*(whole|entire|full|complete|all|code|solution|answer|it for me)"
+        r"|(直接给|给我代码|完整代码|全部代码|直接写|帮我写|告诉我答案)",
+        q,
+    )
+    if cheat_pattern:
+        if mid == "gcd":
+            nudge = "Start by writing `while b != 0:`—what two values need to swap/update inside each iteration?"
+        elif mid == "simplify_fraction":
+            nudge = "Start by calling `g = gcd(a, b)` on line 1 of `simplify_fraction`—how do you reduce `a` and `b` using `g`?"
+        else:
+            nudge = "Start with an `if b == 0:` guard at the top of `safe_simplify_fraction`—what string should it return?"
         return (
-            "🛡️ **Pedagogy Guardrail:** Unlike a generic chatbot, I won't dump the full solution so you keep ownership of the logic! "
-            "Let's build it step by step instead:\n\n"
-            f"- **Step 1:** Look at `{mission['function_name']}`—what is the very first condition or variable you need?\n"
-            "- **Step 2:** Try writing just 2 lines in the editor, click **▶ Run Code**, and ask me to diagnose what happens!"
+            "🛡️ **Pedagogy Guardrail:** I can't write the complete solution for you, because building the logic yourself is the core goal of this lab!\n\n"
+            f"- **Your Next Micro-Step:** {nudge}\n"
+            "- Write just 1–2 lines in the editor, click **▶ Run Code**, and ask me to check your progress."
         )
 
-    if any(k in q for k in ["think", "pair", "blueprint", "bridge", "start", "begin", "思路", "开始"]):
+    # 2. Math / Algorithm Principle Questions (e.g., "How does Euclidean algorithm work?")
+    if any(k in q for k in ["euclid", "algorithm", "math", "principle", "how does", "logic", "work", "欧几里得", "辗转", "原理", "思路", "怎么算"]):
+        if mid == "gcd":
+            return (
+                "📐 **Euclidean Algorithm Intuition:**\n"
+                "The greatest common divisor of `(a, b)` doesn't change if you replace the larger number with the remainder `a % b`.\n\n"
+                "- **Example (`a=8, b=12`):** `(8, 12)` → `(12, 8)` → `(8, 4)` → `(4, 0)`.\n"
+                "- **Stopping rule:** Once `b` reaches `0`, `a` (`4`) is your GCD! How would you write that loop condition in Python?"
+            )
+        if mid == "simplify_fraction":
+            return (
+                "📐 **Fraction Simplification Logic:**\n"
+                "To reduce a fraction `a / b` to lowest terms, divide both `a` and `b` by their greatest common divisor `g = gcd(a, b)`.\n\n"
+                "- **Example (`8 / 12`):** `gcd(8, 12) = 4`, so `(8 // 4, 12 // 4)` gives `(2, 3)`."
+            )
+        return (
+            "📐 **Safe Simplification Logic:**\n"
+            "Division by zero is undefined in mathematics, so `safe_simplify_fraction(a, b)` must intercept `b == 0` **before** computing `gcd` or dividing."
+        )
+
+    # 3. Specific Python Syntax / Operator Questions (%, //, while, tuple, return)
+    if any(k in q for k in ["modulo", "%", "remainder", "取余", "余数"]):
+        return (
+            "🔢 **Modulo (`%`) Operator:** `a % b` returns the remainder after dividing `a` by `b`.\n"
+            "- For example, `12 % 8` evaluates to `4`, and `8 % 4` evaluates to `0`.\n"
+            "- In `gcd(a, b)`, `a % b` gives the exact remainder needed for the next step."
+        )
+    if any(k in q for k in ["//", "division", "divide", "float", "整除", "除法"]):
+        return (
+            "🔢 **Integer Division (`//`) vs. True Division (`/`):**\n"
+            "- `8 / 4` produces a float (`2.0`), whereas `8 // 4` produces an integer (`2`).\n"
+            "- Since fractions expect integer pairs like `(2, 3)`, always use `//`."
+        )
+    if any(k in q for k in ["while", "loop", "infinite", "stop", "循环", "死循环"]):
+        return (
+            "🔁 **How the `while` Loop Terminates:**\n"
+            "- `while b != 0:` keeps running as long as `b` is not zero.\n"
+            "- Inside the loop, updating `a, b = b, a % b` shrinks `b` on every step until `b` inevitably hits `0`."
+        )
+    if any(k in q for k in ["tuple", "list", "return", "print", "元组", "返回"]):
+        return (
+            "📦 **Returning Tuples vs. Printing:**\n"
+            "- Use `return (num, den)` with parentheses `(...)` so the test runner receives a `tuple`.\n"
+            "- Avoid `print(...)` inside the function—`print` outputs text to the console, while the function itself returns `None`."
+        )
+
+    # 4. Bridge from saved 1. Think / 2. Pair notes
+    if any(k in q for k in ["think", "pair", "blueprint", "bridge", "plan", "笔记"]):
         think_text = (st.session_state.think_math or st.session_state.think_python).strip()
         pair_text = st.session_state.pair_pseudocode.strip()
         if think_text or pair_text:
@@ -599,94 +652,84 @@ def generate_socratic_reply(
                 "Let's map that directly to Python:\n"
                 + (
                     "1. In **Mission 1 (`gcd`)**, your repeated remainder step becomes `while b != 0:`.\n"
-                    "2. Inside the loop, how can you update `a` and `b` at the exact same time in one line?"
+                    "2. Inside the loop, update `a` and `b` simultaneously on one line (`a, b = ...`)."
                     if mid == "gcd"
                     else "1. Reuse `g = gcd(a, b)` so you don't rewrite the loop.\n"
-                    "2. Remember to use integer division `//` when building the `(num, den)` tuple!"
+                    "2. Use integer division `//` when building the `(num, den)` tuple."
                 )
             )
         return (
             "📝 **Think-First Tip:** You haven't saved notes in **`1. Think`** yet! "
-            "Try writing 1 sentence there about how you'd solve this by hand, click **Save Think Stage**, "
-            "and I'll help translate your exact words into Python."
+            "Write 1 sentence there about how you'd solve this by hand, click **Save Think Stage**, "
+            "and I'll help translate your words into Python."
         )
 
+    # 5. Edge-case / Hidden-test coaching
     if any(k in q for k in ["edge", "hidden", "boundary", "zero", "0", "边界", "隐藏"]):
         if mid == "gcd":
             return (
                 "🧪 **Edge-Case Check for `gcd(a, b)`:**\n"
-                "- What happens in your code if `a < b`, such as `gcd(8, 12)`?\n"
+                "- What happens if `a < b`, such as `gcd(8, 12)`?\n"
                 "- What if `b == 0`, such as `gcd(9, 0)`? Does your loop skip cleanly and return `9`?"
             )
         if mid == "simplify_fraction":
             return (
                 "🧪 **Edge-Case Check for `simplify_fraction(a, b)`:**\n"
-                "- What if `a` and `b` share no common factor > 1, like `(7, 13)`? What does `gcd(7, 13)` return?\n"
-                "- What if `a > b`, like `(10, 5)`? Make sure it returns `(2, 1)` as a **tuple**, not `2`."
+                "- What if `a` and `b` are coprime, like `(7, 13)`?\n"
+                "- What if `a > b`, like `(10, 5)`? Ensure it returns `(2, 1)` as a **tuple**, not `2`."
             )
         return (
             "🧪 **Edge-Case Check for `safe_simplify_fraction(a, b)`:**\n"
-            "- Trace `(5, 0)` line by line: does your `if b == 0:` check happen **before** calling `gcd(a, b)` or dividing?\n"
+            "- Trace `(5, 0)` line by line: does `if b == 0:` run **before** calling `gcd(a, b)`?\n"
             "- Check the exact spelling and capitalization of `'Undefined'`."
         )
 
+    # 6. Live AST Code Inspection & Test Failure Diagnosis
     if diag["syntax_error"]:
         return (
             f"🔎 **Syntax Clue:** Python paused at **{diag['syntax_error']}**.\n\n"
-            "Check that line (and the line right above it) for a missing colon `:`, unmatched parentheses `()`, or inconsistent 4-space indentation."
+            "Check that line (and the line above it) for a missing colon `:`, unmatched `()`, or inconsistent indentation."
         )
 
     if diag["has_import"]:
         return (
             "🔒 **Sandbox Rule:** `import` statements are disabled here so you can practice writing the core logic directly. "
-            "You only need basic operators (`%`, `//`, `==`, `!=`) and `while`/`if`!"
-        )
-
-    if diag["is_unstarted"]:
-        return (
-            f"👋 Your editor still has the starter template for `{mission['function_name']}`.\n\n"
-            + (
-                "**First micro-step:** Replace `pass` with a `while b != 0:` loop. What should happen to `a` and `b` inside each step?"
-                if mid == "gcd"
-                else "**First micro-step:** Start by calling `g = gcd(a, b)` (or checking `if b == 0:` first in Mission 3). What values should go inside the return tuple?"
-            )
+            "You only need `%`, `//`, `==`, `!=`, and `while`/`if`."
         )
 
     if diag["uses_print_no_return"]:
         return (
             "💡 **Spotted a Classic Bug:** You used `print(...)`, which displays output on screen, "
-            "but automated tests inspect the **returned** value (currently `None`).\n\n"
-            "Try replacing `print(...)` with `return ...` and run again!"
+            "but automated tests inspect the **returned** value (currently `None`). Replace `print(...)` with `return ...`!"
         )
 
-    if mid == "gcd":
+    if mid == "gcd" and not diag["is_unstarted"]:
         if diag["sequential_overwrite"]:
             return (
-                "⚠️ **Subtle Variable Bug Detected:** In your loop, `a = b` runs *before* `b = a % b`, "
-                "which overwrites `a` first so `b % b` becomes `0`!\n\n"
-                "**Socratic Question:** How does Python let you swap/update two variables simultaneously on a single line (`a, b = ...`)?"
+                "⚠️ **Subtle Variable Bug Detected:** `a = b` runs *before* `b = a % b`, overwriting `a` first!\n\n"
+                "**Socratic Question:** How does Python update two variables simultaneously on a single line (`a, b = ...`)?"
             )
         if diag["returns_b"]:
             return (
-                "🤔 Look closely at your `return` statement: when `while b != 0:` finishes, what value does `b` always hold? "
-                "Which variable actually stores the last non-zero remainder?"
+                "🤔 Look closely at your `return` statement: when `while b != 0:` finishes, `b` is always `0`. "
+                "Which variable holds the last non-zero remainder?"
             )
         if not diag["has_modulo"]:
             return (
-                "📐 **Math-to-Code Clue:** The Euclidean Algorithm shrinks `(a, b)` using the **remainder** of `a` divided by `b`. "
+                "📐 **Math-to-Code Clue:** The Euclidean Algorithm uses the **remainder** of `a` divided by `b`. "
                 "Which Python operator computes remainder?"
             )
 
-    if mid in ("simplify_fraction", "safe_simplify_fraction"):
+    if mid in ("simplify_fraction", "safe_simplify_fraction") and not diag["is_unstarted"]:
         if mid == "safe_simplify_fraction" and not diag["checks_b_zero"]:
             return (
                 "🛡️ **Guard Clause Missing:** What happens if someone calls `safe_simplify_fraction(5, 0)` right now?\n\n"
-                "Add an `if b == 0:` check at the **very top** of the function before computing `gcd`."
+                "Add an `if b == 0:` check at the **very top** of the function."
             )
         if diag["uses_true_div"]:
             return (
-                "🔢 **Type Mismatch Clue:** Single `/` in Python always produces decimals (floats like `2.0`), "
-                "whereas fraction tuples require integers. Which operator performs **integer floor division** in Python?"
+                "🔢 **Type Mismatch Clue:** Single `/` produces floats (like `2.0`). "
+                "Use integer floor division `//` instead."
             )
         if diag["returns_list"]:
             return (
@@ -694,22 +737,55 @@ def generate_socratic_reply(
                 "but the specification expects a `tuple` using parentheses `(...)`."
             )
 
-    if feedback and feedback.get("ok"):
-        return (
+    # 7. Starter-template guidance (only when asking to diagnose/start, or tailored to mission)
+    if diag["is_unstarted"]:
+        if any(k in q for k in ["diagnose", "start", "begin", "help", "first", "怎么开始", "诊断", "提示"]):
+            if mid == "gcd":
+                reply = (
+                    "👋 Your editor still has the starter template for `gcd`.\n\n"
+                    "**First micro-step:** Replace `pass` with a `while b != 0:` loop. What should happen to `a` and `b` inside each step?"
+                )
+            elif mid == "simplify_fraction":
+                reply = (
+                    "👋 Your editor still has the starter template for `simplify_fraction`.\n\n"
+                    "**First micro-step:** Replace `pass` with `g = gcd(a, b)` to reuse your helper function. How do you return the reduced pair?"
+                )
+            else:
+                reply = (
+                    "👋 Your editor still has the starter template for `safe_simplify_fraction`.\n\n"
+                    "**First micro-step:** Replace `pass` with `if b == 0:` to handle the zero-denominator edge case first."
+                )
+        else:
+            reply = (
+                f"💬 I see your editor for `{mission['function_name']}` still has `pass`. "
+                "To give you targeted feedback, try asking about:\n"
+                "- **Math logic** (e.g., *\"How does the Euclidean algorithm work?\"*)\n"
+                "- **Python syntax** (e.g., *\"How do `%` or `while` loops work?\"*)\n"
+                "- **Code check** after replacing `pass` and clicking **▶ Run Code**!"
+            )
+    elif feedback and feedback.get("ok"):
+        reply = (
             f"🏆 **`{mission['function_name']}` passed all public & hidden tests!**\n\n"
-            "Before moving on: could you explain in **`5. Reflect`** which part of this logic required your own reasoning rather than AI hints?"
+            "Head over to **`5. Reflect`** to note what required your own reasoning vs. AI support."
         )
-
-    if feedback and not feedback.get("ok"):
-        return (
+    elif feedback and not feedback.get("ok"):
+        reply = (
             f"🔍 **Latest Test Feedback:** {feedback.get('message')}\n\n"
             "Trace your function by hand with the failing input `(a, b)`—what value does each variable hold right before `return`?"
         )
+    else:
+        reply = (
+            f"👍 You've edited `{mission['function_name']}`! "
+            "Click **▶ Run Code** so I can inspect the test results, or ask me about a specific operator (`%`, `//`, `while`)."
+        )
 
-    return (
-        f"👍 You've started writing `{mission['function_name']}`! "
-        "Click **▶ Run Code** to test it against public & hidden cases, or ask me about a specific line you're unsure about."
-    )
+    # Anti-repetition safeguard: never return the exact same message twice in a row
+    history = st.session_state.chat_histories.get(mid, [])
+    last_assistant = next((m["content"] for m in reversed(history) if m["role"] == "assistant"), "")
+    if reply.strip() == last_assistant.strip():
+        reply += "\n\n*(Tip: Try editing a line in the editor and clicking **▶ Run Code**, or ask a specific question about `%`, `while`, or edge cases!)*"
+
+    return reply
 
 
 # =========================================================
